@@ -1,10 +1,11 @@
 # Python dependencies for your project
 jupyter==1.0.0
 notebook==7.0.0
-yfinance==0.2.36
-pandas==2.1.0
-numpy==1.24.0 
-streamlit
-matplotlib
-requests
 lxml
+streamlit==1.37.1
+yfinance==0.2.43
+pandas==2.2.2
+numpy==1.26.4       # avoid NumPy 2.x issues
+matplotlib==3.8.4
+requests==2.32.3
+lxml==5.2.2         # needed if you ever use pandas.read_html
