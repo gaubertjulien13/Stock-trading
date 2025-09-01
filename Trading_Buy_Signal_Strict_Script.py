@@ -27,7 +27,7 @@ MIN_LAST_CLOSE = 3.0            # 0 to disable
 # Default time window
 end_date = datetime.today()
 start_date = end_date - timedelta(days=365)
-lookback_days = 3  # bars, not calendar days
+lookback_days = 5  # bars, not calendar days
 
 # =========================
 # Helper: chunking
@@ -867,7 +867,6 @@ def run_streamlit():
     if 'Last_Signal_Date' in show_df:
         show_df['Last_Signal_Date'] = pd.to_datetime(show_df['Last_Signal_Date']).dt.strftime('%Y-%m-%d')
 
-    import streamlit as st
     st.dataframe(show_df, use_container_width=True, height=520)
 
     st.download_button(
