@@ -739,93 +739,188 @@ def run_streamlit():
 
     if plot_ticker:
         try:
-            company = results_df[results_df['Ticker'] == plot_ticker]['Company'].iloc[0]
-            plot_start = end_date - timedelta(days=180)
-            df = yf.download(plot_ticker, start=plot_start, end=end_date, progress=False)
+            company = results_df.loc[results_df['Ticker'] == plot_ticker, 'Company'].iloc[0]
+            if str(company).strip().upper() == str(plot_ticker).strip().upper() or not str(company).strip():
+                try:
+                    info = yf.Ticker(plot_ticker).info
+                    company = info.get('longName') or info.get('shortName') or company
+                except Exception:
+                    pass
 
-            if not df.empty:
-                if isinstance(df.columns, pd.MultiIndex):
-                    close_col = df[("Close", plot_ticker)] if ("Close", plot_ticker) in df.columns else df["Close"]
+            # --- compute long so SMA200/MACD are defined; show ~6 months ---
+            compute_start = end_date - timedelta(days=420)   # ~14 months
+            plot_cutoff   = end_date - timedelta(days=185)   # ~6 months visible
+
+            raw = yf.download(plot_ticker, start=compute_start, end=end_date, progress=False)
+            if raw.empty:
+                st.error(f"Could not download data for {plot_ticker}")
+            else:
+                # Robust extraction (handles MultiIndex)
+                if isinstance(raw.columns, pd.MultiIndex):
+                    try:
+                        close_col = raw[('Close', plot_ticker)]
+                        high_col  = raw[('High',  plot_ticker)]
+                        low_col   = raw[('Low',   plot_ticker)]
+                        vol_col   = raw[('Volume',plot_ticker)]
+                    except KeyError:
+                        sub = raw.xs(plot_ticker, axis=1, level=1, drop_level=False)
+                        sub.columns = sub.columns.get_level_values(0)
+                        close_col = sub['Close']; high_col = sub['High']; low_col = sub['Low']; vol_col = sub['Volume']
                 else:
-                    close_col = df["Close"]
+                    close_col = raw['Close']; high_col = raw['High']; low_col = raw['Low']; vol_col = raw['Volume']
 
-                df["SMA20"] = close_col.rolling(20).mean()
-                df["SMA50"] = close_col.rolling(50).mean()
-                df["SMA_Buy_Signal"] = (df["SMA20"] > df["SMA50"]) & (df["SMA20"].shift(1) <= df["SMA50"].shift(1))
+                df = pd.DataFrame({
+                    'Close': close_col.astype(float),
+                    'High' : high_col.astype(float),
+                    'Low'  : low_col.astype(float),
+                    'Volume': vol_col.astype(float)
+                })
+
+                # ========= Indicators (exactly like your scanner) =========
+                # SMA20/50 + crossover
+                df["SMA20"] = df["Close"].rolling(20, min_periods=20).mean()
+                df["SMA50"] = df["Close"].rolling(50, min_periods=50).mean()
+                df["SMA_Buy_Signal"]  = (df["SMA20"] > df["SMA50"]) & (df["SMA20"].shift(1) <= df["SMA50"].shift(1))
                 df["SMA_Sell_Signal"] = (df["SMA20"] < df["SMA50"]) & (df["SMA20"].shift(1) >= df["SMA50"].shift(1))
 
-                df["EMA5"] = close_col.ewm(span=5, adjust=False).mean()
-                df["EMA20"] = close_col.ewm(span=20, adjust=False).mean()
-                delta = close_col.diff()
-                gain = delta.where(delta > 0, 0)
-                loss = -delta.where(delta < 0, 0)
-                avg_gain = gain.rolling(14).mean()
-                avg_loss = loss.rolling(14).mean()
-                rs = avg_gain / avg_loss
+                # EMA/RSI (strict inequalities)
+                df["EMA5"]  = df["Close"].ewm(span=5,  adjust=False).mean()
+                df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+                delta = df["Close"].diff()
+                gain = delta.clip(lower=0)
+                loss = -delta.clip(upper=0)
+                avg_gain = gain.rolling(14, min_periods=14).mean()
+                avg_loss = loss.rolling(14, min_periods=14).mean()
+                rs = avg_gain / avg_loss.replace(0, np.nan)
                 df["RSI"] = 100 - (100 / (1 + rs))
+                df["RSI"] = df["RSI"].fillna(50)
+                df["EMA_RSI_Buy_Signal"] = (df["EMA5"] > df["EMA20"]) & (df["RSI"] > 50) & (df["RSI"] < 70)
 
-                df["BB_Middle"] = close_col.rolling(20).mean()
-                bb_std = close_col.rolling(20).std()
-                df["BB_Upper"] = df["BB_Middle"] + 2 * bb_std
-                df["BB_Lower"] = df["BB_Middle"] - 2 * bb_std
-                df["BB_Width"] = df["BB_Upper"] - df["BB_Lower"]
-                bb_lower_bounce = (close_col.shift(1) <= df['BB_Lower'].shift(1) * 1.02) & (close_col > df['BB_Lower'] * 1.02)
-                bb_middle_cross = (close_col > df['BB_Middle']) & (close_col.shift(1) <= df['BB_Middle'].shift(1))
-                bb_width_ok = df['BB_Width'] > df['BB_Width'].rolling(20).mean() * 0.8
-                df["BB_Buy_Signal"] = (bb_lower_bounce | bb_middle_cross) & bb_width_ok
-                bb_upper_bounce = (close_col.shift(1) >= df['BB_Upper'].shift(1) * 0.98) & (close_col < df['BB_Upper'] * 0.98)
-                bb_middle_cross_down = (close_col < df['BB_Middle']) & (close_col.shift(1) >= df['BB_Middle'].shift(1))
+                # Bollinger (buy/sell like your plot)
+                df['BB_Middle'] = df["Close"].rolling(20, min_periods=20).mean()
+                bb_std = df["Close"].rolling(20, min_periods=20).std()
+                df['BB_Upper'] = df['BB_Middle'] + 2 * bb_std
+                df['BB_Lower'] = df['BB_Middle'] - 2 * bb_std
+                df['BB_Width'] = df['BB_Upper'] - df['BB_Lower']
+
+                bb_lower_bounce   = (df["Close"].shift(1) <= df['BB_Lower'].shift(1) * 1.02) & (df["Close"] > df['BB_Lower'] * 1.02)
+                bb_middle_cross   = (df["Close"] > df['BB_Middle']) & (df["Close"].shift(1) <= df['BB_Middle'].shift(1))
+                bb_width_ok       = df['BB_Width'] > df['BB_Width'].rolling(20, min_periods=20).mean() * 0.8
+                df["BB_Buy_Signal"]  = (bb_lower_bounce | bb_middle_cross) & bb_width_ok
+
+                bb_upper_bounce      = (df["Close"].shift(1) >= df['BB_Upper'].shift(1) * 0.98) & (df["Close"] < df['BB_Upper'] * 0.98)
+                bb_middle_cross_down = (df["Close"] < df['BB_Middle']) & (df["Close"].shift(1) >= df['BB_Middle'].shift(1))
                 df["BB_Sell_Signal"] = (bb_upper_bounce | bb_middle_cross_down) & bb_width_ok
 
-                df["All_Methods_Buy"] = ((df["SMA_Buy_Signal"] | (df["SMA20"] > df["SMA50"])) &
-                                         (df["EMA5"] > df["EMA20"]) & df["RSI"].between(50, 70) & df["BB_Buy_Signal"])
+                # Base multi-method combos (same as scanner)
+                df["All_Methods_Buy"]  = ((df["SMA_Buy_Signal"] | (df["SMA20"] > df["SMA50"])) &
+                                        df["EMA_RSI_Buy_Signal"] & df["BB_Buy_Signal"])
                 df["All_Methods_Sell"] = ((df["SMA_Sell_Signal"] | (df["SMA20"] < df["SMA50"])) &
-                                          (df["EMA5"] < df["EMA20"]) & ~df["RSI"].between(50, 70) & df["BB_Sell_Signal"])
+                                        (df["EMA5"] < df["EMA20"]) & ~((df["RSI"] > 50) & (df["RSI"] < 70)) & df["BB_Sell_Signal"])
 
-                df = df.dropna()
+                # Trend & MACD (strict gate components)
+                df["SMA200"] = df["Close"].rolling(200, min_periods=200).mean()
+                ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+                ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+                df["MACD_Line"]   = ema12 - ema26
+                df["MACD_Signal"] = df["MACD_Line"].ewm(span=9, adjust=False).mean()
 
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
-                ax1.plot(df.index, df["Close"], label="Close", alpha=0.85, linewidth=1)
-                ax1.plot(df.index, df["SMA20"], label="SMA20", linewidth=1.2)
-                ax1.plot(df.index, df["SMA50"], label="SMA50", linewidth=1.2)
-                ax1.plot(df.index, df["EMA5"], label="EMA5", linewidth=1.2, alpha=0.8)
-                ax1.plot(df.index, df["EMA20"], label="EMA20", linewidth=1.2, alpha=0.8)
+                # === Mirror scanner acceptance timing ===
+                # Look back N bars for a base buy
+                N = int(lookback_days) if isinstance(lookback_days, int) else 5
+                recent = df.tail(N)
 
-                multi_buy = df[df["All_Methods_Buy"]]
-                multi_sell = df[df["All_Methods_Sell"]]
-                if not multi_buy.empty:
-                    ax1.scatter(multi_buy.index, multi_buy["Close"], marker="^", s=140, label="Multi-Method BUY", zorder=5)
-                if not multi_sell.empty:
-                    ax1.scatter(multi_sell.index, multi_sell["Close"], marker="v", s=140, label="Multi-Method SELL", zorder=5)
+                # Gate evaluated "now" (or recent MACD cross up)
+                trend_ok_now      = (df["Close"].iloc[-1] > df["SMA200"].iloc[-1]) if pd.notna(df["SMA200"].iloc[-1]) else False
+                macd_bull_now     = (df["MACD_Line"].iloc[-1] > df["MACD_Signal"].iloc[-1]) if pd.notna(df["MACD_Line"].iloc[-1]) and pd.notna(df["MACD_Signal"].iloc[-1]) else False
+                macd_cross_up_recent = (((recent["MACD_Line"] > recent["MACD_Signal"]) &
+                                        (recent["MACD_Line"].shift(1) <= recent["MACD_Signal"].shift(1))).any()
+                                        if {'MACD_Line','MACD_Signal'}.issubset(recent.columns) else False)
 
-                ax1.set_title(f"{plot_ticker} {company} - Multi-Method Buy/Sell Signals", fontsize=14, fontweight='bold')
+                # Last base buy within lookback
+                last_base_buy_idx = recent.index[recent["All_Methods_Buy"].fillna(False)].max() if recent["All_Methods_Buy"].fillna(False).any() else None
+
+                # Strict SELL (symmetric definition; optional)
+                macd_bear_now        = (df["MACD_Line"].iloc[-1] < df["MACD_Signal"].iloc[-1]) if pd.notna(df["MACD_Line"].iloc[-1]) and pd.notna(df["MACD_Signal"].iloc[-1]) else False
+                macd_cross_down_recent = (((recent["MACD_Line"] < recent["MACD_Signal"]) &
+                                        (recent["MACD_Line"].shift(1) >= recent["MACD_Signal"].shift(1))).any()
+                                        if {'MACD_Line','MACD_Signal'}.issubset(recent.columns) else False)
+                last_base_sell_idx = recent.index[recent["All_Methods_Sell"].fillna(False)].max() if recent["All_Methods_Sell"].fillna(False).any() else None
+                downtrend_now = (df["Close"].iloc[-1] < df["SMA200"].iloc[-1]) if pd.notna(df["SMA200"].iloc[-1]) else False
+
+                # Slice for plotting AFTER we find indices (so NaNs earlier don’t drop the event)
+                df_plot = df.loc[df.index >= plot_cutoff].copy()
+
+                # ===== Plot (strict markers placed at the base-event date) =====
+                fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(16, 12))
+
+                ax1.plot(df_plot.index, df_plot["Close"], label="Close", linewidth=1.2, alpha=0.9)
+                ax1.plot(df_plot.index, df_plot["SMA20"], label="SMA20", linewidth=1.0)
+                ax1.plot(df_plot.index, df_plot["SMA50"], label="SMA50", linewidth=1.0)
+                ax1.plot(df_plot.index, df_plot["SMA200"], label="SMA200 (gate)", linewidth=1.0)
+
+                # --- NEW: show historical base multi-method signals on the chart (ungated) ---
+                hist_buy  = df_plot[df_plot["All_Methods_Buy"].fillna(False)]
+                hist_sell = df_plot[df_plot["All_Methods_Sell"].fillna(False)]
+                if not hist_buy.empty:
+                    ax1.scatter(hist_buy.index,  hist_buy["Close"],  marker="^", s=60, alpha=0.45,
+                                label="Multi-Method BUY (history)", zorder=4)
+                if not hist_sell.empty:
+                    ax1.scatter(hist_sell.index, hist_sell["Close"], marker="v", s=60, alpha=0.45,
+                                label="Multi-Method SELL (history)", zorder=4)
+                # ---------------------------------------------------------------------------
+
+                # Strict BUY marker if scanner would accept now
+                if last_base_buy_idx is not None and trend_ok_now and (macd_bull_now or macd_cross_up_recent):
+                    if last_base_buy_idx in df_plot.index:
+                        ax1.scatter([last_base_buy_idx], [df_plot.loc[last_base_buy_idx, "Close"]],
+                                    marker="^", s=140, zorder=6, label="Multi-Method BUY (STRICT)")
+
+                # Strict SELL marker (optional symmetric logic)
+                if last_base_sell_idx is not None and downtrend_now and (macd_bear_now or macd_cross_down_recent):
+                    if last_base_sell_idx in df_plot.index:
+                        ax1.scatter([last_base_sell_idx], [df_plot.loc[last_base_sell_idx, "Close"]],
+                                    marker="v", s=140, zorder=6, label="Multi-Method SELL (STRICT)")
+
+                ax1.set_title(f"{plot_ticker} {company} — Strict Multi-Method Signals (last ~6 months)", fontsize=14, fontweight='bold')
                 ax1.set_ylabel("Price (USD)")
                 ax1.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
                 ax1.grid(True, alpha=0.3)
 
-                ax2.plot(df.index, df["RSI"], label="RSI", linewidth=1.5)
+                # RSI panel
+                ax2.plot(df_plot.index, df_plot["RSI"], label="RSI", linewidth=1.2)
                 ax2.axhline(70, linestyle='--', alpha=0.7, label='Overbought (70)')
                 ax2.axhline(30, linestyle='--', alpha=0.7, label='Oversold (30)')
-                ax2.axhline(50, linestyle='-', alpha=0.5, label='Neutral (50)')
+                ax2.axhline(50, linestyle='-',  alpha=0.5, label='Neutral (50)')
                 ax2.set_ylabel("RSI")
-                ax2.set_xlabel("Date")
                 ax2.legend()
                 ax2.grid(True, alpha=0.3)
+
+                # MACD panel
+                ax3.plot(df_plot.index, df_plot["MACD_Line"],   label="MACD line", linewidth=1.2)
+                ax3.plot(df_plot.index, df_plot["MACD_Signal"], label="Signal",    linewidth=1.0)
+                ax3.axhline(0, linestyle='--', alpha=0.6)
+                ax3.set_ylabel("MACD")
+                ax3.set_xlabel("Date")
+                ax3.legend()
+                ax3.grid(True, alpha=0.3)
 
                 plt.tight_layout()
                 st.pyplot(fig)
 
+                # quick visibility counts
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Multi-Method BUY Signals", len(multi_buy))
+                    st.metric("Base buys in lookback", int(recent["All_Methods_Buy"].fillna(False).sum()))
                 with col2:
-                    st.metric("Multi-Method SELL Signals", len(multi_sell))
+                    st.metric("Gate now (SMA200 & MACD)", int(trend_ok_now and (macd_bull_now or macd_cross_up_recent)))
                 with col3:
-                    st.metric("Total Trading Days", len(df))
-            else:
-                st.error(f"Could not download data for {plot_ticker}")
+                    st.metric("Days plotted", len(df_plot))
+
         except Exception as e:
             st.error(f"Error plotting {plot_ticker}: {str(e)}")
+
+
 
     st.subheader("📊 Methodology Breakdown")
     col1, col2, col3 = st.columns(3)
