@@ -234,6 +234,7 @@ def _extract_cols(df, ticker=None):
         volume_col = df['Volume']
     return close_col.astype(float), high_col.astype(float), low_col.astype(float), volume_col.astype(float)
 
+#initial version with small fixes
 def calculate_indicators(ticker, start_date, end_date):
     """
     Calculate technical indicators for a given ticker.
@@ -474,18 +475,18 @@ def _slice_from_batch(data, tkr):
 # =========================
 # Main screening (chunked)
 # =========================
-def screen_SP500_multi_methodology(
+def screen_stocks_multi_methodology(
     min_avg_volume_20=MIN_AVG_VOLUME_20,
     min_last_close=MIN_LAST_CLOSE,
     batch_size=BATCH_SIZE,
     lb_days=lookback_days,
-    _tickers_override=None
+    _tickers_override=None,
+    max_cache_size=1000  # NEW: Prevent memory issues
 ):
     """
     Screen stocks for buy signals from ALL methodologies.
     Uses fast chunked downloads and a global PRICE_DATA cache.
     """
-    # Respect override (used by universe toggle). Otherwise default to S&P 500.
     tickers = _tickers_override or get_sp500_tickers()
     n_tickers = len(tickers)
     multi_buy_signal_stocks = []
@@ -493,74 +494,85 @@ def screen_SP500_multi_methodology(
     PRICE_DATA.clear()
 
     print(f"\nPrefetching historical data in batches of {batch_size}...")
-    for i, batch in enumerate(_chunks(tickers, batch_size), start=1):
-        try:
-            data = yf.download(batch, start=start_date, end=end_date, progress=False,
-                               group_by='ticker', threads=True)
-            if isinstance(data.columns, pd.MultiIndex):
-                for tkr in batch:
-                    try:
-                        sub = _slice_from_batch(data, tkr)
-                        if sub is not None and not sub.empty:
-                            PRICE_DATA[tkr] = sub
-                    except Exception:
-                        pass
-            else:
-                for tkr in batch:
-                    if not data.empty:
-                        PRICE_DATA[tkr] = data.dropna().copy()
-        except Exception as e:
-            print(f"Batch {i}: error during download -> {e}")
-
-        if i % 5 == 0:
-            print(f"  Prefetched ~{min(i*batch_size, n_tickers)}/{n_tickers} symbols")
-
-    print(f"Prefetch complete. Cached {len(PRICE_DATA)} tickers.\n")
-
-    # Liquidity filter
-    if min_avg_volume_20 > 0 or min_last_close > 0.0:
-        filtered_universe = []
-        def _passes_liquidity(tkr):
-            df = PRICE_DATA.get(tkr)
-            if df is None or df.empty or 'Volume' not in df.columns or 'Close' not in df.columns or len(df) < 20:
-                tmp = yf.download(tkr, period="3mo", interval="1d", progress=False, threads=False)
-                if tmp is None or tmp.empty or 'Volume' not in tmp.columns or 'Close' not in tmp.columns or len(tmp) < 20:
-                    return False
-                df = tmp
-
-            vol_ok = float(df['Volume'].tail(20).mean()) >= float(min_avg_volume_20) if min_avg_volume_20 > 0 else True
-            px_ok = float(df['Close'].iloc[-1]) >= float(min_last_close) if min_last_close > 0 else True
-            return bool(vol_ok and px_ok)
-
-        for tkr in tickers:
+    
+    # Process in chunks to manage memory
+    for chunk_start in range(0, n_tickers, max_cache_size):
+        chunk_end = min(chunk_start + max_cache_size, n_tickers)
+        chunk_tickers = tickers[chunk_start:chunk_end]
+        
+        print(f"Processing chunk {chunk_start//max_cache_size + 1}: tickers {chunk_start}-{chunk_end}")
+        
+        # Clear cache for each chunk to manage memory
+        if chunk_start > 0:
+            PRICE_DATA.clear()
+        
+        # Batch download for this chunk
+        for i, batch in enumerate(_chunks(chunk_tickers, batch_size), start=1):
             try:
-                if _passes_liquidity(tkr):
-                    filtered_universe.append(tkr)
-            except Exception:
-                pass
-        print(f"Liquidity filter: {len(filtered_universe)}/{n_tickers} tickers")
-    else:
-        filtered_universe = tickers
+                data = yf.download(batch, start=start_date, end=end_date, progress=False,
+                                   group_by='ticker', threads=True)
+                
+                # Always handle as MultiIndex (more robust)
+                if data is not None and not data.empty:
+                    if isinstance(data.columns, pd.MultiIndex):
+                        for tkr in batch:
+                            try:
+                                sub = _slice_from_batch(data, tkr)
+                                if sub is not None and not sub.empty:
+                                    PRICE_DATA[tkr] = sub
+                            except Exception as e:
+                                print(f"  ⚠️  Failed to extract {tkr}: {e}")
+                    else:
+                        # Single ticker case
+                        if len(batch) == 1:
+                            PRICE_DATA[batch[0]] = data.dropna().copy()
+                        
+            except Exception as e:
+                print(f"Batch download error: {e}")
 
-    print(f"\nScreening {len(filtered_universe)} stocks with multi-methodology approach...")
-    print("This may take several minutes...")
+        # Apply liquidity filter and screen this chunk
+        filtered_chunk = []
+        for tkr in chunk_tickers:
+            try:
+                df = PRICE_DATA.get(tkr)
+                if df is None or df.empty:
+                    continue
+                    
+                # Liquidity check using cached data
+                if len(df) < 20:
+                    continue
+                    
+                vol_ok = (min_avg_volume_20 <= 0 or 
+                         float(df['Volume'].tail(20).mean()) >= float(min_avg_volume_20))
+                px_ok = (min_last_close <= 0 or 
+                        float(df['Close'].iloc[-1]) >= float(min_last_close))
+                
+                if vol_ok and px_ok:
+                    filtered_chunk.append(tkr)
+                    
+            except Exception as e:
+                print(f"  ⚠️  Liquidity filter error for {tkr}: {e}")
+        
+        print(f"Chunk liquidity filter: {len(filtered_chunk)}/{len(chunk_tickers)} tickers")
+        
+        # Screen this chunk
+        for i, ticker in enumerate(filtered_chunk, start=1):
+            try:
+                if (i % 50) == 0:
+                    print(f"  Processed {i}/{len(filtered_chunk)} in current chunk...")
 
-    for i, ticker in enumerate(filtered_universe, start=1):
-        try:
-            if (i % 100) == 0:
-                print(f"Processed {i}/{len(filtered_universe)} stocks...")
+                df = calculate_indicators(ticker, start_date, end_date)
+                result = check_recent_multi_buy_signals(df, ticker, lb_days)
 
-            df = calculate_indicators(ticker, start_date, end_date)
-            result = check_recent_multi_buy_signals(df, ticker, lb_days)
+                if result:
+                    multi_buy_signal_stocks.append(result)
+                    print(f"✅ {ticker}: Multi-methodology buy signal found!")
+                    
+            except Exception as e:
+                print(f"❌ Error processing {ticker}: {str(e)[:100]}...")
+                continue
 
-            if result:
-                multi_buy_signal_stocks.append(result)
-                print(f"✅ {ticker}: Multi-methodology buy signal found!")
-        except Exception as e:
-            print(f"❌ Error processing {ticker}: {e}")
-            continue
-
-    return multi_buy_signal_stocks, len(filtered_universe)
+    return multi_buy_signal_stocks, n_tickers
 
 # =========================
 # Pretty console output
@@ -652,7 +664,7 @@ def run_cli(args):
     else:
         tickers = get_sp500_tickers()
 
-    results, total_screened = screen_SP500_multi_methodology(
+    results, total_screened = screen_stocks_multi_methodology(
         min_avg_volume_20=MIN_AVG_VOLUME_20,
         min_last_close=MIN_LAST_CLOSE,
         batch_size=BATCH_SIZE,
@@ -669,7 +681,7 @@ def run_streamlit():
     import matplotlib.pyplot as plt
     from datetime import timedelta
 
-    st.set_page_config(page_title="SP500 Multi-Method Screener", layout="wide")
+    st.set_page_config(page_title="Stocks Multi-Method Screener", layout="wide")
     st.title("📈 SP500 / Nasdaq Multi-Methodology Strict Screener")
     st.caption("SMA crossover • EMA+RSI • Bollinger bounce/cross • Liquidity filter")
 
@@ -693,7 +705,7 @@ def run_streamlit():
         else:
             tickers = get_sp500_tickers()
 
-        results, total = screen_SP500_multi_methodology(
+        results, total = screen_stocks_multi_methodology(
             min_avg_volume_20=min_vol,
             min_last_close=min_px,
             batch_size=batch,
@@ -967,7 +979,7 @@ def run_streamlit():
     st.download_button(
         "Download full CSV",
         data=results_df.to_csv(index=False),
-        file_name="sp500_multi_methodology_buy_signals.csv",
+        file_name="stocks_multi_methodology_buy_signals.csv",
         mime="text/csv",
         use_container_width=True,
     )
