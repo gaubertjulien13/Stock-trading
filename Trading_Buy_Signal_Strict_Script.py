@@ -1,4 +1,4 @@
-# file: sp500_multi_method_screener.py
+# file: stock_multi_method_screener.py
 import argparse
 import warnings
 warnings.filterwarnings('ignore')
@@ -202,6 +202,93 @@ def get_nasdaq_composite_tickers():
         return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA']
 
 # =========================
+# Enhanced company info extraction
+# =========================
+def get_company_info_robust(ticker, max_retries=3):
+    """
+    Enhanced company info extraction with retries and better fallbacks.
+    Returns (company_name, sector, market_cap) tuple.
+    """
+    import time
+    
+    for attempt in range(max_retries):
+        try:
+            ti = yf.Ticker(ticker)
+            
+            # Initialize defaults
+            company_name = ticker  # Default to ticker
+            sector = "N/A"
+            market_cap = np.nan
+            
+            # Try fast_info first (faster but less reliable)
+            fi = getattr(ti, "fast_info", None)
+            if fi:
+                # Extract company name from fast_info
+                company_name = (getattr(fi, "long_name", None) or 
+                              getattr(fi, "short_name", None) or 
+                              getattr(fi, "display_name", None) or
+                              getattr(fi, "name", None))
+                
+                # Extract sector and market cap
+                sector = getattr(fi, "sector", "N/A") or "N/A"
+                market_cap = getattr(fi, "market_cap", np.nan)
+                
+                # Clean up company name
+                if company_name and company_name.strip() and company_name != "N/A":
+                    company_name = company_name.strip()
+                else:
+                    company_name = None  # Mark for .info fallback
+            
+            # If fast_info failed or returned empty, try .info (slower but more complete)
+            if not company_name or company_name == ticker or sector == "N/A":
+                try:
+                    info = ti.info
+                    
+                    # Get company name from .info if we don't have a good one
+                    if not company_name or company_name == ticker:
+                        info_name = (info.get('longName') or 
+                                   info.get('shortName') or 
+                                   info.get('displayName'))
+                        if info_name and info_name.strip():
+                            company_name = info_name.strip()
+                    
+                    # Get sector from .info if we don't have it
+                    if sector == "N/A":
+                        info_sector = info.get('sector') or info.get('industry')
+                        if info_sector and info_sector.strip():
+                            sector = info_sector.strip()
+                    
+                    # Get market cap from .info if we don't have it
+                    if pd.isna(market_cap):
+                        info_mcap = info.get('marketCap')
+                        if info_mcap:
+                            market_cap = float(info_mcap)
+                            
+                except Exception as info_error:
+                    # .info failed, but we might have partial data from fast_info
+                    pass
+            
+            # Ensure we have a company name (fallback to ticker if all else fails)
+            if not company_name or not company_name.strip():
+                company_name = ticker
+            
+            # Return successful result
+            return company_name, sector, market_cap
+                
+        except Exception as e:
+            # If this isn't our last attempt, wait and retry
+            if attempt < max_retries - 1:
+                print(f"  ⚠️  Attempt {attempt + 1} failed for {ticker}: {str(e)[:50]}... Retrying...")
+                time.sleep(0.5 * (attempt + 1))  # Progressive delay: 0.5s, 1.0s, 1.5s
+                continue
+            else:
+                # Final attempt failed
+                print(f"  ❌ All attempts failed for {ticker}. Using ticker as company name.")
+    
+    # All attempts failed - return minimal fallback data
+    return ticker, "N/A", np.nan
+
+# =========================
 # Indicators
 # =========================
 def _extract_cols(df, ticker=None):
@@ -382,37 +469,14 @@ def check_recent_multi_buy_signals(df, ticker, lookback_days=7):
         atr_stop_2x   = current_price - 2.0 * atr14 if not np.isnan(atr14) else np.nan
 
         # Avoid slow .info; fast_info is OK for mcap
+           # Enhanced company info extraction with retries
         try:
-            ti = yf.Ticker(ticker)
-            fi = getattr(ti, "fast_info", None)
-
-            company_name = "N/A"
-            if fi:
-                company_name = getattr(fi, "long_name", None) or getattr(fi, "short_name", None) or getattr(fi, "display_name", None) or getattr(fi, "name", None)
-
-            if company_name == "N/A" or not company_name:
-                try:
-                    info = ti.info
-                    company_name = info.get('longName', info.get('shortName', info.get('displayName', ticker)))
-                except:
-                    company_name = ticker
-
-            market_cap = getattr(fi, "market_cap", np.nan) if fi else np.nan
-
-            sector = "N/A"
-            if fi:
-                sector = getattr(fi, "sector", "N/A")
-            if sector == "N/A":
-                try:
-                    info = ti.info
-                    sector = info.get('sector', info.get('industry', 'N/A'))
-                except:
-                    sector = "N/A"
-
-        except Exception:
+            company_name, sector, market_cap = get_company_info_robust(ticker, max_retries=2)
+        except Exception as e:
+            print(f"  ❌ Company info extraction completely failed for {ticker}: {e}")
             company_name = ticker
+            sector = "N/A" 
             market_cap = np.nan
-            sector = "N/A"
 
         return {
             'Ticker': ticker,
