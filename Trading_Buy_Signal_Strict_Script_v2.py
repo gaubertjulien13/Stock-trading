@@ -753,15 +753,8 @@ def run_streamlit():
     st.title("📈 SP500 / Nasdaq Multi-Methodology Strict Screener")
     st.caption("SMA crossover • EMA+RSI • Bollinger bounce/cross • Liquidity filter")
     
-    # Reduce scope for cloud testing
     with st.sidebar:
         st.info("Cloud Mode: Reduced ticker set for stability")
-
-    st.set_page_config(page_title="Stocks Multi-Method Screener", layout="wide")
-    st.title("📈 SP500 / Nasdaq Multi-Methodology Strict Screener")
-    st.caption("SMA crossover • EMA+RSI • Bollinger bounce/cross • Liquidity filter")
-
-    with st.sidebar:
         st.subheader("Scan settings")
         universe = st.selectbox("Universe", options=["S&P 500", "Nasdaq Composite"], index=0)
         min_vol = st.number_input("Min 20-day avg volume", value=int(MIN_AVG_VOLUME_20), step=50_000, min_value=0)
