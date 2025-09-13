@@ -322,20 +322,69 @@ def _extract_cols(df, ticker=None):
     return close_col.astype(float), high_col.astype(float), low_col.astype(float), volume_col.astype(float)
 
 #initial version with small fixes
-def calculate_indicators(ticker, start_date, end_date):
+def calculate_indicators_cloud_safe(ticker, start_date, end_date, max_retries=3):
     """
-    Calculate technical indicators for a given ticker.
-    Uses preloaded PRICE_DATA if available (speeds up dramatically).
+    Cloud-safe calculate indicators with comprehensive fallback strategy
     """
-    try:
-        if ticker in PRICE_DATA:
-            df = PRICE_DATA[ticker].copy()
-        else:
-            df = yf.download(ticker, start=start_date, end=end_date, progress=False, group_by='ticker', threads=True)
-
-        if df is None or df.empty or len(df) < 60:
+    import time
+    import random
+    
+    # Try to use cached data first
+    if ticker in PRICE_DATA:
+        df = PRICE_DATA[ticker].copy()
+    else:
+        df = None
+        
+        # Multiple retry attempts with progressive delays
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = random.uniform(1.0, 4.0) * (attempt + 1)
+                    print(f"    ⏳ Retry {attempt + 1} for {ticker}, waiting {delay:.1f}s...")
+                    time.sleep(delay)
+                
+                # Try yfinance download with very conservative settings
+                df = yf.download(
+                    ticker, 
+                    start=start_date, 
+                    end=end_date, 
+                    progress=False,
+                    threads=False,
+                    timeout=60,
+                    interval='1d',
+                    auto_adjust=True,
+                    prepost=False,
+                    repair=True,
+                    actions=False,
+                    keepna=False
+                )
+                
+                if df is not None and not df.empty and len(df) >= 60:
+                    print(f"    ✅ {ticker}: Success on attempt {attempt + 1}")
+                    break
+                else:
+                    print(f"    ⚠️  {ticker}: Insufficient data on attempt {attempt + 1}")
+                    df = None
+                    
+            except Exception as e:
+                error_msg = str(e)
+                if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                    print(f"    🚫 {ticker}: API blocked (attempt {attempt + 1})")
+                else:
+                    print(f"    ❌ {ticker}: {error_msg[:50]}... (attempt {attempt + 1})")
+                df = None
+        
+        # If all retries failed, return None
+        if df is None or df.empty:
+            print(f"    💀 {ticker}: All attempts failed - skipping")
             return None
 
+    # Validate data
+    if df is None or df.empty or len(df) < 60:
+        return None
+
+    try:
+        # Extract columns safely
         close_col, high_col, low_col, volume_col = _extract_cols(df, ticker=ticker)
 
         # === METHODOLOGY 1: SMA CROSSOVER ===
@@ -409,7 +458,7 @@ def calculate_indicators(ticker, start_date, end_date):
         return df
 
     except Exception as e:
-        print(f"Error processing {ticker}: {e}")
+        print(f"    ❌ Indicator calculation failed for {ticker}: {e}")
         return None
 
 # =========================
@@ -625,7 +674,7 @@ def screen_stocks_multi_methodology(
                 if (i % 50) == 0:
                     print(f"  Processed {i}/{len(filtered_chunk)} in current chunk...")
 
-                df = calculate_indicators(ticker, start_date, end_date)
+                df = calculate_indicators_cloud_safe(ticker, start_date, end_date, max_retries=2)
                 result = check_recent_multi_buy_signals(df, ticker, lb_days)
 
                 if result:
@@ -746,15 +795,10 @@ def run_streamlit():
     from datetime import timedelta
 
     st.set_page_config(page_title="Stocks Multi-Method Screener", layout="wide")
-    
-    # Now you can add other Streamlit commands
-    st.warning("⚠️ **Cloud Deployment Notice**: Yahoo Finance API may be rate-limited on Streamlit Cloud. Using conservative settings and smaller dataset.")
-    
     st.title("📈 SP500 / Nasdaq Multi-Methodology Strict Screener")
     st.caption("SMA crossover • EMA+RSI • Bollinger bounce/cross • Liquidity filter")
-    
+
     with st.sidebar:
-        st.info("Cloud Mode: Reduced ticker set for stability")
         st.subheader("Scan settings")
         universe = st.selectbox("Universe", options=["S&P 500", "Nasdaq Composite"], index=0)
         min_vol = st.number_input("Min 20-day avg volume", value=int(MIN_AVG_VOLUME_20), step=50_000, min_value=0)
@@ -773,11 +817,6 @@ def run_streamlit():
             tickers = get_nasdaq_composite_tickers()
         else:
             tickers = get_sp500_tickers()
-
-        # Limit tickers for cloud stability
-        if len(tickers) > 100:
-            tickers = tickers[:100]  # Test with first 100 tickers only
-            st.info(f"🌐 Cloud mode: Testing with first {len(tickers)} tickers")
 
         results, total = screen_stocks_multi_methodology(
             min_avg_volume_20=min_vol,
