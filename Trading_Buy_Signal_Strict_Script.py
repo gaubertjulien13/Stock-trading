@@ -20,7 +20,7 @@ import gzip
 # Global config / cache
 # =========================
 PRICE_DATA = {}                 # Batch cache
-BATCH_SIZE = 60                 # Tune for rate limits
+BATCH_SIZE = 20                 # Tune for rate limits
 MIN_AVG_VOLUME_20 = 150_000     # 0 to disable
 MIN_LAST_CLOSE = 3.0            # 0 to disable
 
@@ -545,7 +545,7 @@ def screen_stocks_multi_methodology(
     batch_size=BATCH_SIZE,
     lb_days=lookback_days,
     _tickers_override=None,
-    max_cache_size=1000  # NEW: Prevent memory issues
+    max_cache_size=500  # NEW: Prevent memory issues
 ):
     """
     Screen stocks for buy signals from ALL methodologies.
