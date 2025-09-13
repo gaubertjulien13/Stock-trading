@@ -745,7 +745,13 @@ def run_streamlit():
     import matplotlib.pyplot as plt
     from datetime import timedelta
 
+    st.set_page_config(page_title="Stocks Multi-Method Screener", layout="wide")
+    
+    # Now you can add other Streamlit commands
     st.warning("⚠️ **Cloud Deployment Notice**: Yahoo Finance API may be rate-limited on Streamlit Cloud. Using conservative settings and smaller dataset.")
+    
+    st.title("📈 SP500 / Nasdaq Multi-Methodology Strict Screener")
+    st.caption("SMA crossover • EMA+RSI • Bollinger bounce/cross • Liquidity filter")
     
     # Reduce scope for cloud testing
     with st.sidebar:
