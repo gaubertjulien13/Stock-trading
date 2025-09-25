@@ -16,6 +16,9 @@ import time
 import json
 import gzip
 
+# Import universe ticker functions from myutils
+from myutils import get_sp500_tickers, get_nasdaq_composite_tickers
+
 # =========================
 # Global config / cache
 # =========================
@@ -35,171 +38,6 @@ lookback_days = 5  # bars, not calendar days
 def _chunks(lst, n):
     for i in range(0, len(lst), n):
         yield lst[i:i+n]
-
-# =========================
-# Universe
-# =========================
-def get_sp500_tickers(use_cache=True, cache_path="sp500_tickers_cache.json.gz", max_cache_age_hours=12):
-    """
-    Return a list of S&P 500 ticker symbols (normalized for yfinance).
-    Strategy: try multiple data sources with graceful fallback.
-    - Primary: GitHub dataset (CSV)
-    - Secondary: StockAnalysis.com list (HTML table)
-    - Tertiary: Wikipedia (HTML table, with headers)
-    Caches results locally to avoid rate limits and transient errors.
-    """
-    def _normalize(tickers):
-        return (
-            pd.Series(tickers)
-            .astype(str)
-            .str.strip()
-            .str.replace(".", "-", regex=False)  # e.g., BRK.B -> BRK-B
-            .str.upper()
-            .dropna()
-            .unique()
-            .tolist()
-        )
-
-    def _valid(tickers):
-        # S&P 500 has ~500 constituents; allow a range for transient changes
-        return isinstance(tickers, list) and 450 <= len(tickers) <= 520
-
-    # ---------- Optional cache ----------
-    if use_cache and os.path.exists(cache_path):
-        try:
-            if cache_path.endswith(".gz"):
-                with gzip.open(cache_path, "rt", encoding="utf-8") as f:
-                    payload = json.load(f)
-            else:
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    payload = json.load(f)
-            age_hours = (time.time() - payload["timestamp"]) / 3600.0
-            if _valid(payload["tickers"]) and age_hours <= max_cache_age_hours:
-                return payload["tickers"]
-        except Exception:
-            pass  # ignore cache errors
-
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    })
-    timeout = 20
-
-    errors = []
-
-    # ---------- Source 1: GitHub CSV (datasets/s-and-p-500-companies) ----------
-    # Maintained dataset with a raw CSV including a 'Symbol' column.
-    try:
-        url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-        resp = session.get(url, timeout=timeout)
-        resp.raise_for_status()
-        df = pd.read_csv(io.StringIO(resp.text))
-        if "Symbol" in df.columns:
-            tickers = _normalize(df["Symbol"])
-            if _valid(tickers):
-                # cache
-                try:
-                    payload = {"timestamp": time.time(), "tickers": tickers}
-                    if cache_path.endswith(".gz"):
-                        with gzip.open(cache_path, "wt", encoding="utf-8") as f:
-                            json.dump(payload, f)
-                    else:
-                        with open(cache_path, "w", encoding="utf-8") as f:
-                            json.dump(payload, f)
-                except Exception:
-                    pass
-                return tickers
-        else:
-            errors.append("GitHub CSV missing 'Symbol' column")
-    except Exception as e:
-        errors.append(f"GitHub CSV failed: {e}")
-
-    # ---------- Source 2: StockAnalysis.com table ----------
-    # Public list page renders a clean table that pandas can read.
-    try:
-        url = "https://stockanalysis.com/list/sp-500-stocks/"
-        tables = pd.read_html(session.get(url, timeout=timeout).text)
-        # find table with a Symbol column
-        df = next((t for t in tables if any(c.lower() == "symbol" for c in map(str, t.columns))), None)
-        if df is not None:
-            # Column could be named exactly 'Symbol' or similar
-            symbol_col = next(c for c in df.columns if str(c).lower() == "symbol")
-            tickers = _normalize(df[symbol_col])
-            if _valid(tickers):
-                # cache
-                try:
-                    payload = {"timestamp": time.time(), "tickers": tickers}
-                    if cache_path.endswith(".gz"):
-                        with gzip.open(cache_path, "wt", encoding="utf-8") as f:
-                            json.dump(payload, f)
-                    else:
-                        with open(cache_path, "w", encoding="utf-8") as f:
-                            json.dump(payload, f)
-                except Exception:
-                    pass
-                return tickers
-        else:
-            errors.append("StockAnalysis page: no table with Symbol found")
-    except Exception as e:
-        errors.append(f"StockAnalysis failed: {e}")
-
-    # ---------- Source 3: Wikipedia (with a proper UA) ----------
-    # The page layout changes; we scan tables for the constituents.
-    try:
-        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        html = session.get(url, timeout=timeout).text
-        tables = pd.read_html(html)
-        sp500 = None
-        for t in tables:
-            cols = [str(c).strip().lower() for c in t.columns]
-            if "symbol" in cols and any(k in cols for k in ["security", "company", "name"]):
-                sp500 = t
-                break
-        if sp500 is not None:
-            symbol_col = next(c for c in sp500.columns if str(c).strip().lower() == "symbol")
-            tickers = _normalize(sp500[symbol_col])
-            if _valid(tickers):
-                # cache
-                try:
-                    payload = {"timestamp": time.time(), "tickers": tickers}
-                    if cache_path.endswith(".gz"):
-                        with gzip.open(cache_path, "wt", encoding="utf-8") as f:
-                            json.dump(payload, f)
-                    else:
-                        with open(cache_path, "w", encoding="utf-8") as f:
-                            json.dump(payload, f)
-                except Exception:
-                    pass
-                return tickers
-        else:
-            errors.append("Wikipedia: constituents table not found")
-    except Exception as e:
-        errors.append(f"Wikipedia failed: {e}")
-
-    # ---------- Final fallback ----------
-    # If everything fails, return a minimal, high-cap set so the rest of your pipeline still runs.
-    print("Warning: all sources failed. Errors:", " | ".join(errors))
-    return ["AAPL", "MSFT", "AMZN", "META", "GOOGL", "GOOG", "NVDA", "BRK-B", "UNH", "XOM"]
-
-def get_nasdaq_composite_tickers():
-    """
-    Fetch Nasdaq-listed common stocks from Nasdaq Trader (HTTPS),
-    filtering out ETFs, test issues, NextShares, etc.
-    """
-    url = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
-    try:
-        resp = requests.get(url, timeout=20)
-        resp.raise_for_status()
-        df = pd.read_csv(StringIO(resp.text), sep="|")
-
-        df = df[(df["Test Issue"] == "N") & (df["ETF"] == "N") & (df["NextShares"] == "N")]
-        tickers = df["Symbol"].dropna().tolist()
-        print(f"Found {len(tickers)} Nasdaq-listed common stocks")
-        return tickers
-    except Exception as e:
-        print(f"Error fetching Nasdaq list: {e}")
-        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA']
 
 # =========================
 # Enhanced company info extraction
@@ -322,69 +160,20 @@ def _extract_cols(df, ticker=None):
     return close_col.astype(float), high_col.astype(float), low_col.astype(float), volume_col.astype(float)
 
 #initial version with small fixes
-def calculate_indicators_cloud_safe(ticker, start_date, end_date, max_retries=3):
+def calculate_indicators(ticker, start_date, end_date):
     """
-    Cloud-safe calculate indicators with comprehensive fallback strategy
+    Calculate technical indicators for a given ticker.
+    Uses preloaded PRICE_DATA if available (speeds up dramatically).
     """
-    import time
-    import random
-    
-    # Try to use cached data first
-    if ticker in PRICE_DATA:
-        df = PRICE_DATA[ticker].copy()
-    else:
-        df = None
-        
-        # Multiple retry attempts with progressive delays
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    delay = random.uniform(1.0, 4.0) * (attempt + 1)
-                    print(f"    ⏳ Retry {attempt + 1} for {ticker}, waiting {delay:.1f}s...")
-                    time.sleep(delay)
-                
-                # Try yfinance download with very conservative settings
-                df = yf.download(
-                    ticker, 
-                    start=start_date, 
-                    end=end_date, 
-                    progress=False,
-                    threads=False,
-                    timeout=60,
-                    interval='1d',
-                    auto_adjust=True,
-                    prepost=False,
-                    repair=True,
-                    actions=False,
-                    keepna=False
-                )
-                
-                if df is not None and not df.empty and len(df) >= 60:
-                    print(f"    ✅ {ticker}: Success on attempt {attempt + 1}")
-                    break
-                else:
-                    print(f"    ⚠️  {ticker}: Insufficient data on attempt {attempt + 1}")
-                    df = None
-                    
-            except Exception as e:
-                error_msg = str(e)
-                if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
-                    print(f"    🚫 {ticker}: API blocked (attempt {attempt + 1})")
-                else:
-                    print(f"    ❌ {ticker}: {error_msg[:50]}... (attempt {attempt + 1})")
-                df = None
-        
-        # If all retries failed, return None
-        if df is None or df.empty:
-            print(f"    💀 {ticker}: All attempts failed - skipping")
+    try:
+        if ticker in PRICE_DATA:
+            df = PRICE_DATA[ticker].copy()
+        else:
+            df = yf.download(ticker, start=start_date, end=end_date, progress=False, group_by='ticker', threads=True)
+
+        if df is None or df.empty or len(df) < 60:
             return None
 
-    # Validate data
-    if df is None or df.empty or len(df) < 60:
-        return None
-
-    try:
-        # Extract columns safely
         close_col, high_col, low_col, volume_col = _extract_cols(df, ticker=ticker)
 
         # === METHODOLOGY 1: SMA CROSSOVER ===
@@ -458,7 +247,7 @@ def calculate_indicators_cloud_safe(ticker, start_date, end_date, max_retries=3)
         return df
 
     except Exception as e:
-        print(f"    ❌ Indicator calculation failed for {ticker}: {e}")
+        print(f"Error processing {ticker}: {e}")
         return None
 
 # =========================
@@ -674,7 +463,7 @@ def screen_stocks_multi_methodology(
                 if (i % 50) == 0:
                     print(f"  Processed {i}/{len(filtered_chunk)} in current chunk...")
 
-                df = calculate_indicators_cloud_safe(ticker, start_date, end_date, max_retries=2)
+                df = calculate_indicators(ticker, start_date, end_date)
                 result = check_recent_multi_buy_signals(df, ticker, lb_days)
 
                 if result:
