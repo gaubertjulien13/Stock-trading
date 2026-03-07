@@ -1,0 +1,10 @@
+.stock_screener.env
+*.env
+__pycache__/
+*.pyc
+*.json.gz
+alert_log.csv
+trade_log.csv
+backtest_summary.csv
+*.csv
+*.ipynb
