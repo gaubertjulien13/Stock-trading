@@ -26,6 +26,7 @@ PRICE_DATA = {}                 # Batch cache
 BATCH_SIZE = 20                 # Tune for rate limits
 MIN_AVG_VOLUME_20 = 150_000     # 0 to disable
 MIN_LAST_CLOSE = 3.0            # 0 to disable
+MIN_CONFIDENCE_SCORE = 6        # Minimum composite score (out of 11) to accept
 
 # Default time window
 end_date = datetime.today()
@@ -40,6 +41,32 @@ def _chunks(lst, n):
         yield lst[i:i+n]
 
 # =========================
+# ADX (Average Directional Index) via Wilder's smoothing
+# =========================
+def _calc_adx(high, low, close, period=14):
+    plus_dm = high.diff()
+    minus_dm = -low.diff()
+
+    plus_dm_clean = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+    minus_dm_clean = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs()
+    ], axis=1).max(axis=1)
+
+    atr = tr.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    plus_di = 100 * plus_dm_clean.ewm(alpha=1/period, min_periods=period, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm_clean.ewm(alpha=1/period, min_periods=period, adjust=False).mean() / atr
+
+    di_sum = (plus_di + minus_di).replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / di_sum
+    adx = dx.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+
+    return adx, plus_di, minus_di
+
+# =========================
 # Enhanced company info extraction
 # =========================
 def get_company_info_robust(ticker, max_retries=3):
@@ -48,82 +75,67 @@ def get_company_info_robust(ticker, max_retries=3):
     Returns (company_name, sector, market_cap) tuple.
     """
     import time
-    
+
     for attempt in range(max_retries):
         try:
             ti = yf.Ticker(ticker)
-            
-            # Initialize defaults
-            company_name = ticker  # Default to ticker
+
+            company_name = ticker
             sector = "N/A"
             market_cap = np.nan
-            
-            # Try fast_info first (faster but less reliable)
+
             fi = getattr(ti, "fast_info", None)
             if fi:
-                # Extract company name from fast_info
-                company_name = (getattr(fi, "long_name", None) or 
-                              getattr(fi, "short_name", None) or 
+                company_name = (getattr(fi, "long_name", None) or
+                              getattr(fi, "short_name", None) or
                               getattr(fi, "display_name", None) or
                               getattr(fi, "name", None))
-                
-                # Extract sector and market cap
+
                 sector = getattr(fi, "sector", "N/A") or "N/A"
                 market_cap = getattr(fi, "market_cap", np.nan)
-                
-                # Clean up company name
+
                 if company_name and company_name.strip() and company_name != "N/A":
                     company_name = company_name.strip()
                 else:
-                    company_name = None  # Mark for .info fallback
-            
-            # If fast_info failed or returned empty, try .info (slower but more complete)
+                    company_name = None
+
             if not company_name or company_name == ticker or sector == "N/A":
                 try:
                     info = ti.info
-                    
-                    # Get company name from .info if we don't have a good one
+
                     if not company_name or company_name == ticker:
-                        info_name = (info.get('longName') or 
-                                   info.get('shortName') or 
+                        info_name = (info.get('longName') or
+                                   info.get('shortName') or
                                    info.get('displayName'))
                         if info_name and info_name.strip():
                             company_name = info_name.strip()
-                    
-                    # Get sector from .info if we don't have it
+
                     if sector == "N/A":
                         info_sector = info.get('sector') or info.get('industry')
                         if info_sector and info_sector.strip():
                             sector = info_sector.strip()
-                    
-                    # Get market cap from .info if we don't have it
+
                     if pd.isna(market_cap):
                         info_mcap = info.get('marketCap')
                         if info_mcap:
                             market_cap = float(info_mcap)
-                            
-                except Exception as info_error:
-                    # .info failed, but we might have partial data from fast_info
+
+                except Exception:
                     pass
-            
-            # Ensure we have a company name (fallback to ticker if all else fails)
+
             if not company_name or not company_name.strip():
                 company_name = ticker
-            
-            # Return successful result
+
             return company_name, sector, market_cap
-                
+
         except Exception as e:
-            # If this isn't our last attempt, wait and retry
             if attempt < max_retries - 1:
                 print(f"  ⚠️  Attempt {attempt + 1} failed for {ticker}: {str(e)[:50]}... Retrying...")
-                time.sleep(0.5 * (attempt + 1))  # Progressive delay: 0.5s, 1.0s, 1.5s
+                time.sleep(0.5 * (attempt + 1))
                 continue
             else:
-                # Final attempt failed
                 print(f"  ❌ All attempts failed for {ticker}. Using ticker as company name.")
-    
-    # All attempts failed - return minimal fallback data
+
     return ticker, "N/A", np.nan
 
 # =========================
@@ -132,7 +144,6 @@ def get_company_info_robust(ticker, max_retries=3):
 def _extract_cols(df, ticker=None):
     """
     Return (close, high, low, volume) Series regardless of single or MultiIndex columns.
-    After batch caching, per-ticker frames are single-level (fields only).
     """
     if isinstance(df.columns, pd.MultiIndex):
         lv0 = df.columns.get_level_values(0)
@@ -159,7 +170,7 @@ def _extract_cols(df, ticker=None):
         volume_col = df['Volume']
     return close_col.astype(float), high_col.astype(float), low_col.astype(float), volume_col.astype(float)
 
-#initial version with small fixes
+
 def calculate_indicators(ticker, start_date, end_date):
     """
     Calculate technical indicators for a given ticker.
@@ -181,24 +192,39 @@ def calculate_indicators(ticker, start_date, end_date):
         df["SMA50"] = close_col.rolling(window=50, min_periods=50).mean()
         df["SMA_Buy_Signal"] = (df["SMA20"] > df["SMA50"]) & (df["SMA20"].shift(1) <= df["SMA50"].shift(1))
 
-        # === (NEW) Trend Filter: 200-day SMA ===
+        # SMA state flags for scoring
+        sma_gap = df["SMA20"] - df["SMA50"]
+        df["SMA_Uptrend"] = df["SMA20"] > df["SMA50"]
+        df["SMA_Accelerating"] = sma_gap > sma_gap.shift(1)
+
+        # Fixed SMA condition: uptrend AND (recent crossover OR accelerating gap)
+        sma_crossover_recent = df["SMA_Buy_Signal"].rolling(10, min_periods=1).sum() > 0
+        df["SMA_Condition"] = df["SMA_Uptrend"] & (sma_crossover_recent | df["SMA_Accelerating"])
+
+        # === Trend Filter: 200-day SMA ===
         df["SMA200"] = close_col.rolling(window=200, min_periods=200).mean()
 
-        # === METHODOLOGY 2: EMA & RSI STRATEGY ===
+        # === METHODOLOGY 2: EMA & RSI (Wilder's smoothing) ===
         df["EMA5"] = close_col.ewm(span=5, adjust=False).mean()
         df["EMA20"] = close_col.ewm(span=20, adjust=False).mean()
 
         delta = close_col.diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
-        avg_gain = gain.rolling(14, min_periods=14).mean()
-        avg_loss = loss.rolling(14, min_periods=14).mean()
+        avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
         rs = avg_gain / avg_loss.replace(0, np.nan)
         df["RSI"] = 100 - (100 / (1 + rs))
         df["RSI"] = df["RSI"].fillna(50)
 
-        # EMA & RSI Buy: EMA5 > EMA20 AND 50 < RSI < 70
-        df["EMA_RSI_Buy_Signal"] = (df["EMA5"] > df["EMA20"]) & (df["RSI"] > 50) & (df["RSI"] < 70)
+        # RSI momentum: rising over last 3 bars
+        df["RSI_Rising"] = df["RSI"] > df["RSI"].shift(3)
+
+        # Wider zone (40-70) catches oversold bounces; must be rising
+        rsi_in_zone = (df["RSI"] > 40) & (df["RSI"] < 70)
+        df["EMA_RSI_Buy_Signal"] = (df["EMA5"] > df["EMA20"]) & rsi_in_zone & df["RSI_Rising"]
+        # Partial (for scoring): zone without rising requirement
+        df["EMA_RSI_Partial"] = (df["EMA5"] > df["EMA20"]) & rsi_in_zone
 
         # === METHODOLOGY 3: BOLLINGER BANDS ===
         df['BB_Middle'] = close_col.rolling(20, min_periods=20).mean()
@@ -213,35 +239,51 @@ def calculate_indicators(ticker, start_date, end_date):
 
         df["BB_Buy_Signal"] = (bb_lower_bounce | bb_middle_cross) & bb_width_ok
 
-        # === EXTRAS ===
+        # === ATR (Wilder's smoothing) ===
         prev_close = close_col.shift(1)
         tr1 = high_col - low_col
         tr2 = (high_col - prev_close).abs()
         tr3 = (low_col - prev_close).abs()
         df["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        df["ATR14"] = df["TR"].rolling(14, min_periods=14).mean()
+        df["ATR14"] = df["TR"].ewm(alpha=1/14, min_periods=14, adjust=False).mean()
 
+        # === VOLUME ===
         df['Volume_MA'] = volume_col.rolling(20, min_periods=20).mean()
         df['Volume_Above_Avg'] = volume_col > df['Volume_MA']
 
         df["BB_Range"] = (df['BB_Upper'] - df['BB_Lower']).abs().clip(lower=1e-9)
 
-        # === (NEW) MACD (12-26-9) ===
+        # === MACD (12-26-9) ===
         ema12 = close_col.ewm(span=12, adjust=False).mean()
         ema26 = close_col.ewm(span=26, adjust=False).mean()
         df["MACD_Line"] = ema12 - ema26
         df["MACD_Signal"] = df["MACD_Line"].ewm(span=9, adjust=False).mean()
         df["MACD_Hist"] = df["MACD_Line"] - df["MACD_Signal"]
 
-        df = df.dropna()
+        # === ADX (trend strength) ===
+        df["ADX"], df["Plus_DI"], df["Minus_DI"] = _calc_adx(high_col, low_col, close_col, period=14)
+
+        # === OBV (On-Balance Volume) ===
+        obv_sign = np.sign(close_col.diff()).fillna(0)
+        df["OBV"] = (obv_sign * volume_col).cumsum()
+        df["OBV_SMA20"] = df["OBV"].rolling(20, min_periods=20).mean()
+        df["OBV_Confirming"] = df["OBV"] > df["OBV_SMA20"]
+
+        # === WEEKLY TREND (resampled from daily data, no extra download) ===
+        weekly_close = close_col.resample('W-FRI').last().dropna()
+        if len(weekly_close) >= 10:
+            weekly_sma10 = weekly_close.rolling(10).mean()
+            weekly_trend_series = weekly_close > weekly_sma10
+            df["Weekly_Uptrend"] = weekly_trend_series.reindex(df.index, method='ffill').fillna(True)
+        else:
+            df["Weekly_Uptrend"] = True
+
+        df = df.dropna(subset=["SMA20", "SMA50", "RSI", "BB_Middle", "ATR14", "MACD_Line"])
         if df.empty:
             return None
 
-        # === COMBINED BUY SIGNAL ===
-        df["All_Methods_Buy"] = (
-            df["SMA_Buy_Signal"] | (df["SMA20"] > df["SMA50"])
-        ) & df["EMA_RSI_Buy_Signal"] & df["BB_Buy_Signal"]
-
+        # === COMBINED BUY SIGNAL (uses fixed SMA condition) ===
+        df["All_Methods_Buy"] = df["SMA_Condition"] & df["EMA_RSI_Buy_Signal"] & df["BB_Buy_Signal"]
         df["Quality_Buy_Signal"] = df["All_Methods_Buy"] & df["Volume_Above_Avg"]
 
         return df
@@ -251,12 +293,13 @@ def calculate_indicators(ticker, start_date, end_date):
         return None
 
 # =========================
-# Recent signal scan
+# Recent signal scan with composite scoring
 # =========================
-def check_recent_multi_buy_signals(df, ticker, lookback_days=7):
+def check_recent_multi_buy_signals(df, ticker, lookback_days=7, min_score=MIN_CONFIDENCE_SCORE):
     """
-    Check if there are buy signals from ALL methodologies in the last N trading bars.
-    (NEW) Require SMA200 uptrend + MACD confirmation. Include ATR-based stops in output.
+    Evaluate buy-signal confidence using a composite scoring system (0-11).
+    Only accepts stocks meeting the minimum score threshold.
+    Includes reward-to-risk ratio for ranking.
     """
     if df is None or df.empty:
         return None
@@ -265,91 +308,160 @@ def check_recent_multi_buy_signals(df, ticker, lookback_days=7):
     if recent_df.empty:
         return None
 
-    sma_signals = int(recent_df['SMA_Buy_Signal'].sum()) + int((recent_df['SMA20'] > recent_df['SMA50']).iloc[-1])
-    ema_rsi_signals = int(recent_df['EMA_RSI_Buy_Signal'].sum())
-    bb_signals = int(recent_df['BB_Buy_Signal'].sum())
-    all_methods_signals = int(recent_df['All_Methods_Buy'].sum())
-    quality_signals = int(recent_df['Quality_Buy_Signal'].sum())
+    latest = df.iloc[-1]
+    current_price = float(latest['Close'])
 
-    # (NEW) Trend & MACD filters
-    latest_close = float(df['Close'].iloc[-1])
-    sma200_val = float(df['SMA200'].iloc[-1]) if 'SMA200' in df.columns and pd.notna(df['SMA200'].iloc[-1]) else np.nan
-    macd_line_now = float(df['MACD_Line'].iloc[-1]) if 'MACD_Line' in df.columns else np.nan
-    macd_signal_now = float(df['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in df.columns else np.nan
+    # --- Trend & MACD (used both as gates and scoring components) ---
+    sma200_val = float(latest['SMA200']) if 'SMA200' in df.columns and pd.notna(latest['SMA200']) else np.nan
+    macd_line_now = float(latest['MACD_Line']) if 'MACD_Line' in df.columns and pd.notna(latest['MACD_Line']) else np.nan
+    macd_signal_now = float(latest['MACD_Signal']) if 'MACD_Signal' in df.columns and pd.notna(latest['MACD_Signal']) else np.nan
 
-    trend_ok = (not np.isnan(sma200_val)) and (latest_close > sma200_val)
+    trend_ok = (not np.isnan(sma200_val)) and (current_price > sma200_val)
     macd_bullish_now = (not np.isnan(macd_line_now)) and (not np.isnan(macd_signal_now)) and (macd_line_now > macd_signal_now)
 
     macd_cross_up_recent = False
     if {'MACD_Line','MACD_Signal'}.issubset(recent_df.columns):
-        macd_cross_up_recent = ((recent_df['MACD_Line'] > recent_df['MACD_Signal']) &
-                                (recent_df['MACD_Line'].shift(1) <= recent_df['MACD_Signal'].shift(1))).any()
+        macd_cross_up_recent = bool(((recent_df['MACD_Line'] > recent_df['MACD_Signal']) &
+                                (recent_df['MACD_Line'].shift(1) <= recent_df['MACD_Signal'].shift(1))).any())
+    macd_ok = macd_bullish_now or macd_cross_up_recent
 
-    # Only accept if base methods fired AND SMA200 uptrend AND MACD bullish (now or recent cross)
-    if all_methods_signals > 0 and trend_ok and (macd_bullish_now or macd_cross_up_recent):
-        all_signal_dates = recent_df[recent_df['All_Methods_Buy']].index
-        last_all_signal = all_signal_dates.max() if len(all_signal_dates) > 0 else None
+    # =================================================================
+    # COMPOSITE SCORING (max 11)
+    # =================================================================
+    score = 0
 
-        current_price = float(df['Close'].iloc[-1])
-        current_rsi = float(df['RSI'].iloc[-1])
-        current_ema5 = float(df['EMA5'].iloc[-1])
-        current_ema20 = float(df['EMA20'].iloc[-1])
-        current_sma20 = float(df['SMA20'].iloc[-1])
-        current_sma50 = float(df['SMA50'].iloc[-1])
+    # 1. SMA condition (0-2): uptrend + (recent crossover or accelerating)
+    sma_uptrend_now = bool(latest.get('SMA_Uptrend', False))
+    sma_crossover_in_lookback = bool(recent_df['SMA_Buy_Signal'].any()) if 'SMA_Buy_Signal' in recent_df.columns else False
+    sma_accel_now = bool(latest.get('SMA_Accelerating', False))
+    if sma_uptrend_now and (sma_crossover_in_lookback or sma_accel_now):
+        score += 2
+    elif sma_uptrend_now:
+        score += 1
 
-        ema_strength = ((current_ema5 - current_ema20) / current_ema20) * 100 if current_ema20 else 0.0
-        sma_strength = ((current_sma20 - current_sma50) / current_sma50) * 100 if current_sma50 else 0.0
-        bb_position = ((current_price - df['BB_Lower'].iloc[-1]) / df['BB_Range'].iloc[-1]) * 100
+    # 2. EMA + RSI (0-2): full signal (zone + rising) vs partial (zone only)
+    ema_rsi_full = bool(recent_df['EMA_RSI_Buy_Signal'].any()) if 'EMA_RSI_Buy_Signal' in recent_df.columns else False
+    ema_rsi_partial = bool(recent_df.get('EMA_RSI_Partial', pd.Series(dtype=bool)).any())
+    if ema_rsi_full:
+        score += 2
+    elif ema_rsi_partial:
+        score += 1
 
-        # (NEW) ATR-based stops
-        atr14 = float(df['ATR14'].iloc[-1]) if 'ATR14' in df.columns and pd.notna(df['ATR14'].iloc[-1]) else np.nan
-        atr_stop_1_5x = current_price - 1.5 * atr14 if not np.isnan(atr14) else np.nan
-        atr_stop_2x   = current_price - 2.0 * atr14 if not np.isnan(atr14) else np.nan
+    # 3. Bollinger Bands + volume (0-2)
+    bb_fired = bool(recent_df['BB_Buy_Signal'].any()) if 'BB_Buy_Signal' in recent_df.columns else False
+    bb_with_vol = bool((recent_df.get('BB_Buy_Signal', pd.Series(dtype=bool)) &
+                        recent_df.get('Volume_Above_Avg', pd.Series(dtype=bool))).any())
+    if bb_with_vol:
+        score += 2
+    elif bb_fired:
+        score += 1
 
-        # Avoid slow .info; fast_info is OK for mcap
-           # Enhanced company info extraction with retries
-        try:
-            company_name, sector, market_cap = get_company_info_robust(ticker, max_retries=2)
-        except Exception as e:
-            print(f"  ❌ Company info extraction completely failed for {ticker}: {e}")
-            company_name = ticker
-            sector = "N/A" 
-            market_cap = np.nan
+    # 4. Above SMA200 (0-1)
+    if trend_ok:
+        score += 1
 
-        return {
-            'Ticker': ticker,
-            'Company': company_name,
-            'Sector': sector,
-            'Current_Price': current_price,
-            'RSI': current_rsi,
-            'EMA_Strength_%': ema_strength,
-            'SMA_Strength_%': sma_strength,
-            'BB_Position_%': bb_position,
-            'SMA_Signals': int(sma_signals > 0),
-            'EMA_RSI_Signals': ema_rsi_signals,
-            'BB_Signals': bb_signals,
-            'All_Methods_Signals': all_methods_signals,
-            'Quality_Signals': quality_signals,
-            'Last_Signal_Date': last_all_signal,
-            'Market_Cap': market_cap,
-            # (NEW) qualifiers & stops
-            'Above_SMA200': int(trend_ok),
-            'MACD_Bullish': int(macd_bullish_now or macd_cross_up_recent),
-            'ATR14': atr14,
-            'ATR_Stop_1_5x': atr_stop_1_5x,
-            'ATR_Stop_2x': atr_stop_2x
-        }
+    # 5. MACD bullish (0-1)
+    if macd_ok:
+        score += 1
 
-    return None
+    # 6. ADX trending (0-1): ADX > 20 means a real trend exists
+    adx_val = float(latest['ADX']) if 'ADX' in df.columns and pd.notna(latest['ADX']) else 0.0
+    if adx_val > 20:
+        score += 1
+
+    # 7. OBV confirming (0-1): accumulation (OBV above its 20-SMA)
+    obv_ok = bool(latest['OBV_Confirming']) if 'OBV_Confirming' in df.columns and pd.notna(latest['OBV_Confirming']) else False
+    if obv_ok:
+        score += 1
+
+    # 8. Weekly uptrend (0-1): daily data resampled to weekly
+    weekly_ok = bool(latest['Weekly_Uptrend']) if 'Weekly_Uptrend' in df.columns and pd.notna(latest['Weekly_Uptrend']) else True
+    if weekly_ok:
+        score += 1
+
+    # =================================================================
+    # ACCEPT / REJECT based on minimum score
+    # =================================================================
+    if score < min_score:
+        return None
+
+    # --- Signal metadata ---
+    all_methods_signals = int(recent_df['All_Methods_Buy'].sum()) if 'All_Methods_Buy' in recent_df.columns else 0
+    quality_signals = int(recent_df['Quality_Buy_Signal'].sum()) if 'Quality_Buy_Signal' in recent_df.columns else 0
+    sma_signals = int(recent_df['SMA_Buy_Signal'].sum()) + int(sma_uptrend_now)
+    ema_rsi_signals = int(recent_df['EMA_RSI_Buy_Signal'].sum()) if 'EMA_RSI_Buy_Signal' in recent_df.columns else 0
+    bb_signals = int(recent_df['BB_Buy_Signal'].sum()) if 'BB_Buy_Signal' in recent_df.columns else 0
+
+    all_signal_dates = recent_df[recent_df['All_Methods_Buy']].index if 'All_Methods_Buy' in recent_df.columns else pd.DatetimeIndex([])
+    last_all_signal = all_signal_dates.max() if len(all_signal_dates) > 0 else None
+
+    current_rsi = float(latest['RSI'])
+    current_ema5 = float(latest['EMA5'])
+    current_ema20 = float(latest['EMA20'])
+    current_sma20 = float(latest['SMA20'])
+    current_sma50 = float(latest['SMA50'])
+
+    ema_strength = ((current_ema5 - current_ema20) / current_ema20) * 100 if current_ema20 else 0.0
+    sma_strength = ((current_sma20 - current_sma50) / current_sma50) * 100 if current_sma50 else 0.0
+    bb_position = ((current_price - float(latest['BB_Lower'])) / float(latest['BB_Range'])) * 100
+
+    # --- ATR-based stops and reward-to-risk ---
+    atr14 = float(latest['ATR14']) if 'ATR14' in df.columns and pd.notna(latest['ATR14']) else np.nan
+
+    stop_distance = 2.0 * atr14 if not np.isnan(atr14) else np.nan
+    atr_stop = current_price - stop_distance if not np.isnan(stop_distance) else np.nan
+
+    bb_upper_now = float(latest['BB_Upper']) if pd.notna(latest['BB_Upper']) else current_price
+    recent_high = float(df['High' if 'High' in df.columns else 'Close'].tail(20).max())
+    target_price = max(bb_upper_now, recent_high)
+    target_distance = target_price - current_price
+
+    if not np.isnan(stop_distance) and stop_distance > 0 and target_distance > 0:
+        reward_risk = round(target_distance / stop_distance, 2)
+    else:
+        reward_risk = np.nan
+
+    # --- Company info ---
+    try:
+        company_name, sector, market_cap = get_company_info_robust(ticker, max_retries=2)
+    except Exception:
+        company_name, sector, market_cap = ticker, "N/A", np.nan
+
+    return {
+        'Ticker': ticker,
+        'Company': company_name,
+        'Sector': sector,
+        'Current_Price': current_price,
+        'RSI': current_rsi,
+        'EMA_Strength_%': ema_strength,
+        'SMA_Strength_%': sma_strength,
+        'BB_Position_%': bb_position,
+        'SMA_Signals': int(sma_signals > 0),
+        'EMA_RSI_Signals': ema_rsi_signals,
+        'BB_Signals': bb_signals,
+        'All_Methods_Signals': all_methods_signals,
+        'Quality_Signals': quality_signals,
+        'Last_Signal_Date': last_all_signal,
+        'Market_Cap': market_cap,
+        'Confidence': score,
+        'Max_Score': 11,
+        'Above_SMA200': int(trend_ok),
+        'MACD_Bullish': int(macd_ok),
+        'ADX': round(adx_val, 1),
+        'OBV_Confirm': int(obv_ok),
+        'Weekly_Up': int(weekly_ok),
+        'ATR14': atr14,
+        'Stop_Loss': atr_stop,
+        'Target': target_price,
+        'Reward_Risk': reward_risk,
+    }
 
 # =========================
 # Batch slice helper (FIXED)
 # =========================
 def _slice_from_batch(data, tkr):
     """
-    Robustly extract a single-ticker OHLCV frame from a yfinance batch DataFrame,
-    regardless of whether columns are (field, ticker) or (ticker, field).
-    Returns a single-level dataframe with columns ['Open','High','Low','Close','Adj Close','Volume'] when available.
+    Robustly extract a single-ticker OHLCV frame from a yfinance batch DataFrame.
     """
     if not isinstance(data.columns, pd.MultiIndex):
         return data.dropna().copy() if not data.empty else None
@@ -382,12 +494,12 @@ def screen_stocks_multi_methodology(
     min_last_close=MIN_LAST_CLOSE,
     batch_size=BATCH_SIZE,
     lb_days=lookback_days,
+    min_score=MIN_CONFIDENCE_SCORE,
     _tickers_override=None,
-    max_cache_size=500  # NEW: Prevent memory issues
+    max_cache_size=500
 ):
     """
-    Screen stocks for buy signals from ALL methodologies.
-    Uses fast chunked downloads and a global PRICE_DATA cache.
+    Screen stocks for buy signals using composite scoring.
     """
     tickers = _tickers_override or get_sp500_tickers()
     n_tickers = len(tickers)
@@ -396,25 +508,21 @@ def screen_stocks_multi_methodology(
     PRICE_DATA.clear()
 
     print(f"\nPrefetching historical data in batches of {batch_size}...")
-    
-    # Process in chunks to manage memory
+
     for chunk_start in range(0, n_tickers, max_cache_size):
         chunk_end = min(chunk_start + max_cache_size, n_tickers)
         chunk_tickers = tickers[chunk_start:chunk_end]
-        
+
         print(f"Processing chunk {chunk_start//max_cache_size + 1}: tickers {chunk_start}-{chunk_end}")
-        
-        # Clear cache for each chunk to manage memory
+
         if chunk_start > 0:
             PRICE_DATA.clear()
-        
-        # Batch download for this chunk
+
         for i, batch in enumerate(_chunks(chunk_tickers, batch_size), start=1):
             try:
                 data = yf.download(batch, start=start_date, end=end_date, progress=False,
                                    group_by='ticker', threads=True)
-                
-                # Always handle as MultiIndex (more robust)
+
                 if data is not None and not data.empty:
                     if isinstance(data.columns, pd.MultiIndex):
                         for tkr in batch:
@@ -425,51 +533,47 @@ def screen_stocks_multi_methodology(
                             except Exception as e:
                                 print(f"  ⚠️  Failed to extract {tkr}: {e}")
                     else:
-                        # Single ticker case
                         if len(batch) == 1:
                             PRICE_DATA[batch[0]] = data.dropna().copy()
-                        
+
             except Exception as e:
                 print(f"Batch download error: {e}")
 
-        # Apply liquidity filter and screen this chunk
         filtered_chunk = []
         for tkr in chunk_tickers:
             try:
                 df = PRICE_DATA.get(tkr)
                 if df is None or df.empty:
                     continue
-                    
-                # Liquidity check using cached data
+
                 if len(df) < 20:
                     continue
-                    
-                vol_ok = (min_avg_volume_20 <= 0 or 
+
+                vol_ok = (min_avg_volume_20 <= 0 or
                          float(df['Volume'].tail(20).mean()) >= float(min_avg_volume_20))
-                px_ok = (min_last_close <= 0 or 
+                px_ok = (min_last_close <= 0 or
                         float(df['Close'].iloc[-1]) >= float(min_last_close))
-                
+
                 if vol_ok and px_ok:
                     filtered_chunk.append(tkr)
-                    
+
             except Exception as e:
                 print(f"  ⚠️  Liquidity filter error for {tkr}: {e}")
-        
+
         print(f"Chunk liquidity filter: {len(filtered_chunk)}/{len(chunk_tickers)} tickers")
-        
-        # Screen this chunk
+
         for i, ticker in enumerate(filtered_chunk, start=1):
             try:
                 if (i % 50) == 0:
                     print(f"  Processed {i}/{len(filtered_chunk)} in current chunk...")
 
                 df = calculate_indicators(ticker, start_date, end_date)
-                result = check_recent_multi_buy_signals(df, ticker, lb_days)
+                result = check_recent_multi_buy_signals(df, ticker, lb_days, min_score=min_score)
 
                 if result:
                     multi_buy_signal_stocks.append(result)
-                    print(f"✅ {ticker}: Multi-methodology buy signal found!")
-                    
+                    print(f"✅ {ticker}: score {result['Confidence']}/{result['Max_Score']}  R:R {result.get('Reward_Risk', 'N/A')}")
+
             except Exception as e:
                 print(f"❌ Error processing {ticker}: {str(e)[:100]}...")
                 continue
@@ -481,37 +585,46 @@ def screen_stocks_multi_methodology(
 # =========================
 def _print_console(results, total_screened):
     print("\n" + "=" * 80)
-    print("🎯 SP500 STOCKS WITH BUY SIGNALS FROM ALL METHODOLOGIES")
+    print("🎯 MULTI-METHODOLOGY SCREENER — COMPOSITE SCORING")
     print("=" * 80)
 
     if results:
         results_df = pd.DataFrame(results)
-        results_df['Combined_Strength'] = results_df['EMA_Strength_%'] + results_df['SMA_Strength_%']
-        results_df = results_df.sort_values('Combined_Strength', ascending=False)
+        results_df = results_df.sort_values(['Confidence', 'Reward_Risk'], ascending=[False, False])
 
         print(f"\n📊 SUMMARY:")
         print(f"Total stocks screened: {total_screened}")
-        print(f"Stocks with ALL methodology buy signals: {len(results_df)}")
+        print(f"Stocks passing score threshold (≥{MIN_CONFIDENCE_SCORE}/11): {len(results_df)}")
         success_rate = (len(results_df) / max(total_screened, 1)) * 100
-        print(f"Success rate: {success_rate:.2f}%")
-        print(f"Quality signals (with volume): {int(results_df['Quality_Signals'].sum())}")
+        print(f"Hit rate: {success_rate:.2f}%")
+        avg_score = results_df['Confidence'].mean()
+        print(f"Average confidence score: {avg_score:.1f}/11")
+        quality_count = int((results_df['Quality_Signals'] > 0).sum())
+        print(f"Quality signals (with volume): {quality_count}")
 
         print(f"\n📈 DETAILED RESULTS:")
-        print("-" * 140)
+        print("-" * 160)
 
-        display_cols = ['Ticker', 'Company', 'Sector', 'Current_Price', 'RSI',
-                        'EMA_Strength_%', 'SMA_Strength_%', 'BB_Position_%',
-                        'All_Methods_Signals', 'Quality_Signals', 'Last_Signal_Date',
-                        # NEW fields appended
-                        'Above_SMA200', 'MACD_Bullish', 'ATR14', 'ATR_Stop_1_5x', 'ATR_Stop_2x']
+        display_cols = ['Ticker', 'Company', 'Sector', 'Current_Price', 'Confidence',
+                        'RSI', 'ADX', 'EMA_Strength_%', 'SMA_Strength_%', 'BB_Position_%',
+                        'Above_SMA200', 'MACD_Bullish', 'OBV_Confirm', 'Weekly_Up',
+                        'Stop_Loss', 'Target', 'Reward_Risk', 'Last_Signal_Date']
         existing_cols = [c for c in display_cols if c in results_df.columns]
         display_df = results_df[existing_cols].copy()
 
         display_df['Current_Price'] = display_df['Current_Price'].map(lambda x: f"${x:.2f}")
+        display_df['Confidence'] = display_df['Confidence'].map(lambda x: f"{x}/11")
         display_df['RSI'] = display_df['RSI'].map(lambda x: f"{x:.1f}")
+        display_df['ADX'] = display_df['ADX'].map(lambda x: f"{x:.1f}")
         display_df['EMA_Strength_%'] = display_df['EMA_Strength_%'].map(lambda x: f"{x:.2f}%")
         display_df['SMA_Strength_%'] = display_df['SMA_Strength_%'].map(lambda x: f"{x:.2f}%")
         display_df['BB_Position_%'] = display_df['BB_Position_%'].map(lambda x: f"{x:.1f}%")
+        if 'Stop_Loss' in display_df:
+            display_df['Stop_Loss'] = display_df['Stop_Loss'].map(lambda x: f"${x:.2f}" if pd.notna(x) else 'N/A')
+        if 'Target' in display_df:
+            display_df['Target'] = display_df['Target'].map(lambda x: f"${x:.2f}" if pd.notna(x) else 'N/A')
+        if 'Reward_Risk' in display_df:
+            display_df['Reward_Risk'] = display_df['Reward_Risk'].map(lambda x: f"{x:.2f}" if pd.notna(x) else 'N/A')
         display_df['Last_Signal_Date'] = display_df['Last_Signal_Date'].apply(
             lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else 'N/A')
 
@@ -520,32 +633,32 @@ def _print_console(results, total_screened):
         pd.set_option('display.max_colwidth', 25)
         print(display_df.to_string(index=False))
 
-        print(f"\n📊 METHODOLOGY VALIDATION:")
-        print(f"Stocks with SMA signals: {int(results_df['SMA_Signals'].sum())}")
-        print(f"Stocks with EMA+RSI signals: {int(results_df['EMA_RSI_Signals'].sum())}")
-        print(f"Stocks with Bollinger Bands signals: {int(results_df['BB_Signals'].sum())}")
-        print(f"Stocks with ALL methodologies: {len(results_df)}")
+        print(f"\n📊 SCORE DISTRIBUTION:")
+        for sc in sorted(results_df['Confidence'].unique(), reverse=True):
+            count = (results_df['Confidence'] == sc).sum()
+            bar = "█" * count
+            print(f"  {sc:2d}/11: {bar} ({count})")
 
         print(f"\n📊 SECTOR BREAKDOWN:")
         sector_counts = results_df['Sector'].value_counts()
         for sector, count in sector_counts.items():
-            print(f"{sector}: {count} stocks")
+            print(f"  {sector}: {count} stocks")
 
-        print(f"\n🏆 TOP 10 STRONGEST MULTI-METHODOLOGY SIGNALS:")
+        print(f"\n🏆 TOP 10 BY CONFIDENCE + R:R:")
         top_10 = results_df.head(10)
         for _, row in top_10.iterrows():
-            print(f"{row['Ticker']} ({str(row['Company'])[:25]}...)")
-            print(f"   EMA: {row['EMA_Strength_%']:.2f}%, SMA: {row['SMA_Strength_%']:.2f}%, RSI: {row['RSI']:.1f}, BB: {row['BB_Position_%']:.1f}%")
+            rr = f"{row['Reward_Risk']:.2f}" if pd.notna(row['Reward_Risk']) else "N/A"
+            print(f"  {row['Ticker']:6s} ({str(row['Company'])[:25]:25s})  "
+                  f"Score: {row['Confidence']}/11  R:R: {rr}  RSI: {row['RSI']:.1f}  ADX: {row['ADX']:.1f}")
 
         quality_stocks = results_df[results_df['Quality_Signals'] > 0]
         if len(quality_stocks) > 0:
-            print(f"\n⭐ HIGH-QUALITY SIGNALS (with volume confirmation): {len(quality_stocks)} stocks")
+            print(f"\n⭐ HIGH-QUALITY SIGNALS (volume-confirmed): {len(quality_stocks)} stocks")
             for _, row in quality_stocks.iterrows():
                 print(f"   {row['Ticker']} - {str(row['Company'])[:30]}")
     else:
-        print("❌ No stocks found with buy signals from ALL methodologies in the last window.")
-        print("This is normal - the multi-methodology approach is very selective!")
-        print("Consider:\n- Extending the lookback period (try 14 days)\n- Running during different market conditions\n- Checking individual methodology results")
+        print(f"❌ No stocks met the minimum confidence score of {MIN_CONFIDENCE_SCORE}/11.")
+        print("Consider:\n- Lowering --min-score (try 5)\n- Extending the lookback period (try 10 days)\n- Running during different market conditions")
     print("\n" + "=" * 80)
     print("🏁 Multi-methodology screening completed!")
     print("=" * 80)
@@ -554,13 +667,13 @@ def _print_console(results, total_screened):
 # CLI entrypoint
 # =========================
 def run_cli(args):
-    global MIN_AVG_VOLUME_20, MIN_LAST_CLOSE, lookback_days, BATCH_SIZE
+    global MIN_AVG_VOLUME_20, MIN_LAST_CLOSE, lookback_days, BATCH_SIZE, MIN_CONFIDENCE_SCORE
     MIN_AVG_VOLUME_20 = args.min_volume
     MIN_LAST_CLOSE = args.min_price
     lookback_days = args.lookback
     BATCH_SIZE = args.batch
+    MIN_CONFIDENCE_SCORE = args.min_score
 
-    # Universe selection
     if args.universe.lower() == "nasdaq":
         tickers = get_nasdaq_composite_tickers()
     else:
@@ -571,12 +684,13 @@ def run_cli(args):
         min_last_close=MIN_LAST_CLOSE,
         batch_size=BATCH_SIZE,
         lb_days=lookback_days,
+        min_score=MIN_CONFIDENCE_SCORE,
         _tickers_override=tickers
     )
     _print_console(results, total_screened)
 
 # =========================
-# Streamlit app (optional)
+# Streamlit app
 # =========================
 def run_streamlit():
     import streamlit as st
@@ -584,8 +698,8 @@ def run_streamlit():
     from datetime import timedelta
 
     st.set_page_config(page_title="Stocks Multi-Method Screener", layout="wide")
-    st.title("📈 SP500 / Nasdaq Multi-Methodology Strict Screener")
-    st.caption("SMA crossover • EMA+RSI • Bollinger bounce/cross • Liquidity filter")
+    st.title("📈 Multi-Methodology Screener — Composite Scoring")
+    st.caption("SMA crossover • EMA+RSI (Wilder) • Bollinger • MACD • ADX • OBV • Weekly trend")
 
     with st.sidebar:
         st.subheader("Scan settings")
@@ -593,15 +707,28 @@ def run_streamlit():
         min_vol = st.number_input("Min 20-day avg volume", value=int(MIN_AVG_VOLUME_20), step=50_000, min_value=0)
         min_px = st.number_input("Min last close ($)", value=float(MIN_LAST_CLOSE), step=0.5, min_value=0.0, format="%.2f")
         lb_days = st.number_input("Lookback bars", value=int(lookback_days), step=1, min_value=3, max_value=30)
+        min_score = st.slider("Min confidence score", min_value=1, max_value=11, value=int(MIN_CONFIDENCE_SCORE))
         batch = st.number_input("Batch size", value=int(BATCH_SIZE), step=20, min_value=20, max_value=200)
 
         run_btn = st.button("Run scan now")
         st.caption(f"Window: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}")
 
+        st.markdown("---")
+        st.markdown("**Score components (max 11):**")
+        st.markdown("""
+- SMA condition: 0-2
+- EMA + RSI: 0-2
+- Bollinger Bands: 0-2
+- Above SMA200: 0-1
+- MACD bullish: 0-1
+- ADX trending: 0-1
+- OBV confirming: 0-1
+- Weekly uptrend: 0-1
+""")
+
     @st.cache_data(ttl=24*3600, show_spinner=False)
-    def run_scan_cached(universe, min_vol, min_px, batch, lb_days):
+    def run_scan_cached(universe, min_vol, min_px, batch, lb_days, min_score):
         PRICE_DATA.clear()
-        # Decide universe here; pass via override to keep structure
         if universe == "Nasdaq Composite":
             tickers = get_nasdaq_composite_tickers()
         else:
@@ -612,39 +739,47 @@ def run_streamlit():
             min_last_close=min_px,
             batch_size=batch,
             lb_days=lb_days,
+            min_score=min_score,
             _tickers_override=tickers
         )
         df = pd.DataFrame(results) if results else pd.DataFrame()
         if not df.empty:
-            df["Combined_Strength"] = df["EMA_Strength_%"] + df["SMA_Strength_%"]
-            df = df.sort_values("Combined_Strength", ascending=False)
+            df = df.sort_values(['Confidence', 'Reward_Risk'], ascending=[False, False])
         return df, total
 
     if run_btn:
         st.toast("Running fresh scan… this can take several minutes.", icon="⏳")
         st.cache_data.clear()
 
-    results_df, total_screened = run_scan_cached(universe, min_vol, min_px, batch, lb_days)
+    results_df, total_screened = run_scan_cached(universe, min_vol, min_px, batch, lb_days, min_score)
 
     if results_df.empty:
-        st.info("No stocks found with buy signals from ALL methodologies in the last window.")
+        st.info(f"No stocks met the minimum confidence score of {min_score}/11 in the last window.")
         return
 
-    quality_signals = int(results_df["Quality_Signals"].sum()) if "Quality_Signals" in results_df else 0
     success_rate = 100.0 * len(results_df) / max(total_screened, 1)
 
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Universe", universe)
     m2.metric("Total screened", f"{total_screened:,}")
-    m3.metric("Multi-method signals", f"{len(results_df):,}")
+    m3.metric("Signals found", f"{len(results_df):,}")
     m4.metric("Hit rate", f"{success_rate:.2f}%")
+    m5.metric("Avg score", f"{results_df['Confidence'].mean():.1f}/11")
 
-    st.subheader("🏆 Top 10 by Combined Strength")
+    st.subheader("🏆 Top 10 by Confidence + R:R")
     top10 = results_df.head(10)
     if not top10.empty:
-        st.table(top10[['Ticker', 'Company', 'EMA_Strength_%', 'SMA_Strength_%', 'RSI', 'BB_Position_%']])
+        top10_display = top10[['Ticker', 'Company', 'Confidence', 'Reward_Risk',
+                                'RSI', 'ADX', 'EMA_Strength_%', 'SMA_Strength_%']].copy()
+        top10_display['Confidence'] = top10_display['Confidence'].map(lambda x: f"{x}/11")
+        top10_display['Reward_Risk'] = top10_display['Reward_Risk'].map(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+        top10_display['RSI'] = top10_display['RSI'].map(lambda x: f"{x:.1f}")
+        top10_display['ADX'] = top10_display['ADX'].map(lambda x: f"{x:.1f}")
+        top10_display['EMA_Strength_%'] = top10_display['EMA_Strength_%'].map(lambda x: f"{x:.2f}%")
+        top10_display['SMA_Strength_%'] = top10_display['SMA_Strength_%'].map(lambda x: f"{x:.2f}%")
+        st.table(top10_display)
 
-    st.subheader("📈 Multi-Methodology Signal Plots")
+    st.subheader("📈 Signal Analysis Plots")
     plot_ticker = st.selectbox(
         "Select ticker to plot:",
         options=results_df['Ticker'].tolist(),
@@ -654,6 +789,9 @@ def run_streamlit():
     if plot_ticker:
         try:
             company = results_df.loc[results_df['Ticker'] == plot_ticker, 'Company'].iloc[0]
+            ticker_row = results_df[results_df['Ticker'] == plot_ticker].iloc[0]
+            ticker_confidence = int(ticker_row['Confidence'])
+
             if str(company).strip().upper() == str(plot_ticker).strip().upper() or not str(company).strip():
                 try:
                     info = yf.Ticker(plot_ticker).info
@@ -661,15 +799,13 @@ def run_streamlit():
                 except Exception:
                     pass
 
-            # --- compute long so SMA200/MACD are defined; show ~6 months ---
-            compute_start = end_date - timedelta(days=420)   # ~14 months
-            plot_cutoff   = end_date - timedelta(days=185)   # ~6 months visible
+            compute_start = end_date - timedelta(days=420)
+            plot_cutoff   = end_date - timedelta(days=185)
 
             raw = yf.download(plot_ticker, start=compute_start, end=end_date, progress=False)
             if raw.empty:
                 st.error(f"Could not download data for {plot_ticker}")
             else:
-                # Robust extraction (handles MultiIndex)
                 if isinstance(raw.columns, pd.MultiIndex):
                     try:
                         close_col = raw[('Close', plot_ticker)]
@@ -690,27 +826,36 @@ def run_streamlit():
                     'Volume': vol_col.astype(float)
                 })
 
-                # ========= Indicators (exactly like your scanner) =========
-                # SMA20/50 + crossover
+                # === Indicators (matching calculate_indicators exactly) ===
+
                 df["SMA20"] = df["Close"].rolling(20, min_periods=20).mean()
                 df["SMA50"] = df["Close"].rolling(50, min_periods=50).mean()
                 df["SMA_Buy_Signal"]  = (df["SMA20"] > df["SMA50"]) & (df["SMA20"].shift(1) <= df["SMA50"].shift(1))
                 df["SMA_Sell_Signal"] = (df["SMA20"] < df["SMA50"]) & (df["SMA20"].shift(1) >= df["SMA50"].shift(1))
 
-                # EMA/RSI (strict inequalities)
+                sma_gap = df["SMA20"] - df["SMA50"]
+                df["SMA_Uptrend"] = df["SMA20"] > df["SMA50"]
+                df["SMA_Accelerating"] = sma_gap > sma_gap.shift(1)
+                sma_cross_recent = df["SMA_Buy_Signal"].rolling(10, min_periods=1).sum() > 0
+                df["SMA_Condition"] = df["SMA_Uptrend"] & (sma_cross_recent | df["SMA_Accelerating"])
+
+                # EMA + RSI (Wilder's)
                 df["EMA5"]  = df["Close"].ewm(span=5,  adjust=False).mean()
                 df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
                 delta = df["Close"].diff()
                 gain = delta.clip(lower=0)
                 loss = -delta.clip(upper=0)
-                avg_gain = gain.rolling(14, min_periods=14).mean()
-                avg_loss = loss.rolling(14, min_periods=14).mean()
+                avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+                avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
                 rs = avg_gain / avg_loss.replace(0, np.nan)
                 df["RSI"] = 100 - (100 / (1 + rs))
                 df["RSI"] = df["RSI"].fillna(50)
-                df["EMA_RSI_Buy_Signal"] = (df["EMA5"] > df["EMA20"]) & (df["RSI"] > 50) & (df["RSI"] < 70)
+                df["RSI_Rising"] = df["RSI"] > df["RSI"].shift(3)
 
-                # Bollinger (buy/sell like your plot)
+                rsi_in_zone = (df["RSI"] > 40) & (df["RSI"] < 70)
+                df["EMA_RSI_Buy_Signal"] = (df["EMA5"] > df["EMA20"]) & rsi_in_zone & df["RSI_Rising"]
+
+                # Bollinger
                 df['BB_Middle'] = df["Close"].rolling(20, min_periods=20).mean()
                 bb_std = df["Close"].rolling(20, min_periods=20).std()
                 df['BB_Upper'] = df['BB_Middle'] + 2 * bb_std
@@ -726,35 +871,43 @@ def run_streamlit():
                 bb_middle_cross_down = (df["Close"] < df['BB_Middle']) & (df["Close"].shift(1) >= df['BB_Middle'].shift(1))
                 df["BB_Sell_Signal"] = (bb_upper_bounce | bb_middle_cross_down) & bb_width_ok
 
-                # Base multi-method combos (same as scanner)
-                df["All_Methods_Buy"]  = ((df["SMA_Buy_Signal"] | (df["SMA20"] > df["SMA50"])) &
-                                        df["EMA_RSI_Buy_Signal"] & df["BB_Buy_Signal"])
-                df["All_Methods_Sell"] = ((df["SMA_Sell_Signal"] | (df["SMA20"] < df["SMA50"])) &
-                                        (df["EMA5"] < df["EMA20"]) & ~((df["RSI"] > 50) & (df["RSI"] < 70)) & df["BB_Sell_Signal"])
+                # Volume
+                df['Volume_MA'] = df['Volume'].rolling(20, min_periods=20).mean()
+                df['Volume_Above_Avg'] = df['Volume'] > df['Volume_MA']
 
-                # Trend & MACD (strict gate components)
+                # Combined signals (fixed SMA condition)
+                df["All_Methods_Buy"]  = (df["SMA_Condition"] & df["EMA_RSI_Buy_Signal"] & df["BB_Buy_Signal"])
+                df["All_Methods_Sell"] = ((df["SMA_Sell_Signal"] | (df["SMA20"] < df["SMA50"])) &
+                                        (df["EMA5"] < df["EMA20"]) & ~rsi_in_zone & df["BB_Sell_Signal"])
+
+                # SMA200 + MACD
                 df["SMA200"] = df["Close"].rolling(200, min_periods=200).mean()
                 ema12 = df["Close"].ewm(span=12, adjust=False).mean()
                 ema26 = df["Close"].ewm(span=26, adjust=False).mean()
                 df["MACD_Line"]   = ema12 - ema26
                 df["MACD_Signal"] = df["MACD_Line"].ewm(span=9, adjust=False).mean()
 
-                # === Mirror scanner acceptance timing ===
-                # Look back N bars for a base buy
+                # ADX
+                df["ADX"], df["Plus_DI"], df["Minus_DI"] = _calc_adx(
+                    df["High"], df["Low"], df["Close"], period=14)
+
+                # OBV
+                obv_sign = np.sign(df["Close"].diff()).fillna(0)
+                df["OBV"] = (obv_sign * df["Volume"]).cumsum()
+                df["OBV_SMA20"] = df["OBV"].rolling(20, min_periods=20).mean()
+
+                # === Lookback window ===
                 N = int(lookback_days) if isinstance(lookback_days, int) else 5
                 recent = df.tail(N)
 
-                # Gate evaluated "now" (or recent MACD cross up)
                 trend_ok_now      = (df["Close"].iloc[-1] > df["SMA200"].iloc[-1]) if pd.notna(df["SMA200"].iloc[-1]) else False
                 macd_bull_now     = (df["MACD_Line"].iloc[-1] > df["MACD_Signal"].iloc[-1]) if pd.notna(df["MACD_Line"].iloc[-1]) and pd.notna(df["MACD_Signal"].iloc[-1]) else False
                 macd_cross_up_recent = (((recent["MACD_Line"] > recent["MACD_Signal"]) &
                                         (recent["MACD_Line"].shift(1) <= recent["MACD_Signal"].shift(1))).any()
                                         if {'MACD_Line','MACD_Signal'}.issubset(recent.columns) else False)
 
-                # Last base buy within lookback
                 last_base_buy_idx = recent.index[recent["All_Methods_Buy"].fillna(False)].max() if recent["All_Methods_Buy"].fillna(False).any() else None
 
-                # Strict SELL (symmetric definition; optional)
                 macd_bear_now        = (df["MACD_Line"].iloc[-1] < df["MACD_Signal"].iloc[-1]) if pd.notna(df["MACD_Line"].iloc[-1]) and pd.notna(df["MACD_Signal"].iloc[-1]) else False
                 macd_cross_down_recent = (((recent["MACD_Line"] < recent["MACD_Signal"]) &
                                         (recent["MACD_Line"].shift(1) >= recent["MACD_Signal"].shift(1))).any()
@@ -762,117 +915,176 @@ def run_streamlit():
                 last_base_sell_idx = recent.index[recent["All_Methods_Sell"].fillna(False)].max() if recent["All_Methods_Sell"].fillna(False).any() else None
                 downtrend_now = (df["Close"].iloc[-1] < df["SMA200"].iloc[-1]) if pd.notna(df["SMA200"].iloc[-1]) else False
 
-                # Slice for plotting AFTER we find indices (so NaNs earlier don’t drop the event)
                 df_plot = df.loc[df.index >= plot_cutoff].copy()
 
-                # ===== Plot (strict markers placed at the base-event date) =====
-                fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(16, 12))
+                # ===== 4-panel plot: Price, RSI, MACD, ADX =====
+                fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(16, 16),
+                    gridspec_kw={'height_ratios': [3, 1, 1, 1]})
 
+                # Panel 1: Price + MAs + signals
                 ax1.plot(df_plot.index, df_plot["Close"], label="Close", linewidth=1.2, alpha=0.9)
                 ax1.plot(df_plot.index, df_plot["SMA20"], label="SMA20", linewidth=1.0)
                 ax1.plot(df_plot.index, df_plot["SMA50"], label="SMA50", linewidth=1.0)
-                ax1.plot(df_plot.index, df_plot["SMA200"], label="SMA200 (gate)", linewidth=1.0)
+                ax1.plot(df_plot.index, df_plot["SMA200"], label="SMA200", linewidth=1.0, linestyle='--', alpha=0.7)
 
-                # --- NEW: show historical base multi-method signals on the chart (ungated) ---
+                # Historical base multi-method signals (ungated)
                 hist_buy  = df_plot[df_plot["All_Methods_Buy"].fillna(False)]
                 hist_sell = df_plot[df_plot["All_Methods_Sell"].fillna(False)]
                 if not hist_buy.empty:
                     ax1.scatter(hist_buy.index,  hist_buy["Close"],  marker="^", s=60, alpha=0.45,
-                                label="Multi-Method BUY (history)", zorder=4)
+                                color='green', label="Multi-Method BUY (base)", zorder=4)
                 if not hist_sell.empty:
                     ax1.scatter(hist_sell.index, hist_sell["Close"], marker="v", s=60, alpha=0.45,
-                                label="Multi-Method SELL (history)", zorder=4)
-                # ---------------------------------------------------------------------------
+                                color='red', label="Multi-Method SELL (base)", zorder=4)
 
-                # Strict BUY marker if scanner would accept now
+                # Strict BUY marker (all 3 base methods + SMA200 + MACD on same day)
                 if last_base_buy_idx is not None and trend_ok_now and (macd_bull_now or macd_cross_up_recent):
                     if last_base_buy_idx in df_plot.index:
                         ax1.scatter([last_base_buy_idx], [df_plot.loc[last_base_buy_idx, "Close"]],
-                                    marker="^", s=140, zorder=6, label="Multi-Method BUY (STRICT)")
+                                    marker="^", s=180, zorder=6, color='lime', edgecolors='black',
+                                    linewidths=1, label="STRICT BUY (all methods)")
 
-                # Strict SELL marker (optional symmetric logic)
+                # Strict SELL marker
                 if last_base_sell_idx is not None and downtrend_now and (macd_bear_now or macd_cross_down_recent):
                     if last_base_sell_idx in df_plot.index:
                         ax1.scatter([last_base_sell_idx], [df_plot.loc[last_base_sell_idx, "Close"]],
-                                    marker="v", s=140, zorder=6, label="Multi-Method SELL (STRICT)")
+                                    marker="v", s=180, zorder=6, color='red', edgecolors='black',
+                                    linewidths=1, label="STRICT SELL (all methods)")
 
-                ax1.set_title(f"{plot_ticker} {company} — Strict Multi-Method Signals (last ~6 months)", fontsize=14, fontweight='bold')
+                # SCORE-BASED ENTRY marker: always shown on the last bar for stocks
+                # that passed the composite score threshold (fixes the mismatch where
+                # a stock appears in results but has no marker on the plot)
+                last_bar_date = df_plot.index[-1]
+                last_bar_close = float(df_plot["Close"].iloc[-1])
+                ax1.scatter([last_bar_date], [last_bar_close],
+                            marker="D", s=200, zorder=7, color='gold', edgecolors='black',
+                            linewidths=1.5, label=f"SCORE ENTRY ({ticker_confidence}/11)")
+
+                ax1.set_title(f"{plot_ticker} {company} — Composite Score {ticker_confidence}/11 (last ~6 months)", fontsize=14, fontweight='bold')
                 ax1.set_ylabel("Price (USD)")
-                ax1.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
+                ax1.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=8)
                 ax1.grid(True, alpha=0.3)
 
-                # RSI panel
-                ax2.plot(df_plot.index, df_plot["RSI"], label="RSI", linewidth=1.2)
-                ax2.axhline(70, linestyle='--', alpha=0.7, label='Overbought (70)')
-                ax2.axhline(30, linestyle='--', alpha=0.7, label='Oversold (30)')
-                ax2.axhline(50, linestyle='-',  alpha=0.5, label='Neutral (50)')
+                # Panel 2: RSI (Wilder's)
+                ax2.plot(df_plot.index, df_plot["RSI"], label="RSI (Wilder)", linewidth=1.2)
+                ax2.axhline(70, linestyle='--', alpha=0.7, color='red', label='Overbought (70)')
+                ax2.axhline(40, linestyle='--', alpha=0.7, color='orange', label='Entry zone (40)')
+                ax2.axhline(30, linestyle='--', alpha=0.7, color='green', label='Oversold (30)')
+                ax2.axhspan(40, 70, alpha=0.05, color='green')
                 ax2.set_ylabel("RSI")
-                ax2.legend()
+                ax2.legend(fontsize=7, loc='upper left')
                 ax2.grid(True, alpha=0.3)
 
-                # MACD panel
-                ax3.plot(df_plot.index, df_plot["MACD_Line"],   label="MACD line", linewidth=1.2)
+                # Panel 3: MACD
+                ax3.plot(df_plot.index, df_plot["MACD_Line"],   label="MACD", linewidth=1.2)
                 ax3.plot(df_plot.index, df_plot["MACD_Signal"], label="Signal",    linewidth=1.0)
+                macd_hist = df_plot["MACD_Line"] - df_plot["MACD_Signal"]
+                colors = ['green' if v >= 0 else 'red' for v in macd_hist]
+                ax3.bar(df_plot.index, macd_hist, color=colors, alpha=0.3, width=1)
                 ax3.axhline(0, linestyle='--', alpha=0.6)
                 ax3.set_ylabel("MACD")
-                ax3.set_xlabel("Date")
-                ax3.legend()
+                ax3.legend(fontsize=7, loc='upper left')
                 ax3.grid(True, alpha=0.3)
+
+                # Panel 4: ADX + DI
+                ax4.plot(df_plot.index, df_plot["ADX"], label="ADX", linewidth=1.5, color='purple')
+                ax4.plot(df_plot.index, df_plot["Plus_DI"], label="+DI", linewidth=0.8, color='green', alpha=0.7)
+                ax4.plot(df_plot.index, df_plot["Minus_DI"], label="-DI", linewidth=0.8, color='red', alpha=0.7)
+                ax4.axhline(20, linestyle='--', alpha=0.6, color='gray', label='Trending threshold (20)')
+                ax4.axhline(25, linestyle=':', alpha=0.4, color='gray')
+                ax4.set_ylabel("ADX / DI")
+                ax4.set_xlabel("Date")
+                ax4.legend(fontsize=7, loc='upper left')
+                ax4.grid(True, alpha=0.3)
 
                 plt.tight_layout()
                 st.pyplot(fig)
 
-                # quick visibility counts
-                col1, col2, col3 = st.columns(3)
+                # Score component breakdown
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Base buys in lookback", int(recent["All_Methods_Buy"].fillna(False).sum()))
+                    st.metric("Confidence Score", f"{ticker_confidence}/11")
                 with col2:
-                    st.metric("Gate now (SMA200 & MACD)", int(trend_ok_now and (macd_bull_now or macd_cross_up_recent)))
+                    rr = f"{ticker_row['Reward_Risk']:.2f}" if pd.notna(ticker_row['Reward_Risk']) else "N/A"
+                    st.metric("Reward:Risk", rr)
                 with col3:
-                    st.metric("Days plotted", len(df_plot))
+                    st.metric("ADX", f"{ticker_row['ADX']:.1f}")
+                with col4:
+                    gate_ok = int(trend_ok_now and (macd_bull_now or macd_cross_up_recent))
+                    st.metric("Gate (SMA200 & MACD)", gate_ok)
+
+                st.markdown("**Score breakdown:**")
+                comp_cols = st.columns(8)
+                labels = ['SMA', 'EMA+RSI', 'BB', 'SMA200', 'MACD', 'ADX>20', 'OBV', 'Weekly']
+                keys = ['SMA_Signals', 'EMA_RSI_Signals', 'BB_Signals', 'Above_SMA200',
+                        'MACD_Bullish', 'ADX', 'OBV_Confirm', 'Weekly_Up']
+                for i, (label, key) in enumerate(zip(labels, keys)):
+                    val = ticker_row.get(key, 0)
+                    if key == 'ADX':
+                        display_val = "✅" if float(val) > 20 else "❌"
+                    else:
+                        display_val = "✅" if val else "❌"
+                    comp_cols[i].markdown(f"**{label}**\n\n{display_val}")
 
         except Exception as e:
             st.error(f"Error plotting {plot_ticker}: {str(e)}")
 
-
+    st.subheader("📊 Score Distribution")
+    if 'Confidence' in results_df.columns:
+        score_counts = results_df['Confidence'].value_counts().sort_index(ascending=False)
+        chart_data = pd.DataFrame({'Score': [f"{s}/11" for s in score_counts.index], 'Count': score_counts.values})
+        st.bar_chart(chart_data.set_index('Score'))
 
     st.subheader("📊 Methodology Breakdown")
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.write("**Top 10 by EMA Strength**")
-        top_ema = results_df.nlargest(10, 'EMA_Strength_%')[['Ticker', 'Company', 'EMA_Strength_%', 'RSI']]
-        st.dataframe(top_ema, use_container_width=True, height=300)
+        st.write("**Top 10 by Confidence**")
+        top_conf = results_df.nlargest(10, 'Confidence')[['Ticker', 'Company', 'Confidence', 'Reward_Risk', 'RSI']]
+        st.dataframe(top_conf, use_container_width=True, height=300)
 
     with col2:
-        st.write("**Top 10 by SMA Strength**")
-        top_sma = results_df.nlargest(10, 'SMA_Strength_%')[['Ticker', 'Company', 'SMA_Strength_%', 'BB_Position_%']]
-        st.dataframe(top_sma, use_container_width=True, height=300)
+        st.write("**Top 10 by Reward:Risk**")
+        rr_valid = results_df.dropna(subset=['Reward_Risk'])
+        if not rr_valid.empty:
+            top_rr = rr_valid.nlargest(10, 'Reward_Risk')[['Ticker', 'Company', 'Reward_Risk', 'Confidence', 'ADX']]
+            st.dataframe(top_rr, use_container_width=True, height=300)
+        else:
+            st.write("No R:R data available")
 
     with col3:
-        st.write("**Top 10 by Combined Strength**")
-        top_combined = results_df.head(10)[['Ticker', 'Company', 'EMA_Strength_%', 'SMA_Strength_%', 'Combined_Strength']]
-        st.dataframe(top_combined, use_container_width=True, height=300)
+        st.write("**Top 10 by ADX (trend strength)**")
+        top_adx = results_df.nlargest(10, 'ADX')[['Ticker', 'Company', 'ADX', 'Confidence', 'RSI']]
+        st.dataframe(top_adx, use_container_width=True, height=300)
 
     st.subheader("📋 Complete Results")
-    display_cols = ['Ticker', 'Company', 'Sector', 'Current_Price', 'RSI',
-                    'EMA_Strength_%', 'SMA_Strength_%', 'BB_Position_%',
-                    'All_Methods_Signals', 'Quality_Signals', 'Last_Signal_Date',
-                    # NEW fields appended to table
-                    'Above_SMA200', 'MACD_Bullish', 'ATR14', 'ATR_Stop_1_5x', 'ATR_Stop_2x']
+    display_cols = ['Ticker', 'Company', 'Sector', 'Current_Price', 'Confidence',
+                    'RSI', 'ADX', 'EMA_Strength_%', 'SMA_Strength_%', 'BB_Position_%',
+                    'Above_SMA200', 'MACD_Bullish', 'OBV_Confirm', 'Weekly_Up',
+                    'Stop_Loss', 'Target', 'Reward_Risk', 'Last_Signal_Date']
     existing_cols = [c for c in display_cols if c in results_df.columns]
     show_df = results_df[existing_cols].copy()
 
     if 'Current_Price' in show_df:
         show_df['Current_Price'] = show_df['Current_Price'].map(lambda x: f"${x:.2f}")
+    if 'Confidence' in show_df:
+        show_df['Confidence'] = show_df['Confidence'].map(lambda x: f"{x}/11")
     if 'RSI' in show_df:
         show_df['RSI'] = show_df['RSI'].map(lambda x: f"{x:.1f}")
+    if 'ADX' in show_df:
+        show_df['ADX'] = show_df['ADX'].map(lambda x: f"{x:.1f}")
     if 'EMA_Strength_%' in show_df:
         show_df['EMA_Strength_%'] = show_df['EMA_Strength_%'].map(lambda x: f"{x:.2f}%")
     if 'SMA_Strength_%' in show_df:
         show_df['SMA_Strength_%'] = show_df['SMA_Strength_%'].map(lambda x: f"{x:.2f}%")
     if 'BB_Position_%' in show_df:
         show_df['BB_Position_%'] = show_df['BB_Position_%'].map(lambda x: f"{x:.1f}%")
+    if 'Stop_Loss' in show_df:
+        show_df['Stop_Loss'] = show_df['Stop_Loss'].map(lambda x: f"${x:.2f}" if pd.notna(x) else "N/A")
+    if 'Target' in show_df:
+        show_df['Target'] = show_df['Target'].map(lambda x: f"${x:.2f}" if pd.notna(x) else "N/A")
+    if 'Reward_Risk' in show_df:
+        show_df['Reward_Risk'] = show_df['Reward_Risk'].map(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
     if 'Last_Signal_Date' in show_df:
         show_df['Last_Signal_Date'] = pd.to_datetime(show_df['Last_Signal_Date']).dt.strftime('%Y-%m-%d')
 
@@ -890,12 +1102,13 @@ def run_streamlit():
 # Main
 # =========================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SP500 multi-method screener (CLI or Streamlit).")
+    parser = argparse.ArgumentParser(description="Multi-method screener with composite scoring (CLI or Streamlit).")
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode (default is Streamlit).")
     parser.add_argument("--min-volume", type=int, default=MIN_AVG_VOLUME_20, help="Min 20-day avg volume.")
     parser.add_argument("--min-price", type=float, default=MIN_LAST_CLOSE, help="Min last close price.")
     parser.add_argument("--lookback", type=int, default=lookback_days, help="Lookback bars for signals.")
     parser.add_argument("--batch", type=int, default=BATCH_SIZE, help="Batch size for yfinance download.")
+    parser.add_argument("--min-score", type=int, default=MIN_CONFIDENCE_SCORE, help="Min confidence score (1-11).")
     parser.add_argument("--universe", type=str, default="sp500", choices=["sp500", "nasdaq"],
                         help="Universe to scan (sp500 or nasdaq).")
     args = parser.parse_args()
@@ -903,6 +1116,4 @@ if __name__ == "__main__":
     if args.cli:
         run_cli(args)
     else:
-        # Launch Streamlit app when executed normally:
-        #   streamlit run sp500_multi_method_screener.py
         run_streamlit()
