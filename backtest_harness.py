@@ -561,9 +561,96 @@ def _window_mask(index, start, end):
     return (index >= s) & (index < e)
 
 
+# Default weights mirror the live compute_signal_score (max 17).
+DEFAULT_WEIGHTS = {
+    'sma200': 3, 'adx_strong': 2, 'adx_trending': 1, 'rs': 2,
+    'rsi_sweet': 3, 'rsi_warm': 1, 'bb_bounce': 3, 'bb_cross': 1,
+    'vol_surge': 2, 'vol_above': 1, 'macd_strong': 2, 'macd_improving': 1,
+}
+
+
+def make_param_scorer(weights):
+    """Return a scorer with the same interface/details as compute_signal_score but
+    using a custom weight map, so weight configurations can be A/B validated."""
+    w = weights
+
+    def _score(intra_df, daily_ctx, lookback_bars=5):
+        if intra_df is None or intra_df.empty or daily_ctx is None:
+            return 0, None
+        n = max(3, int(lookback_bars))
+        recent = intra_df.tail(n)
+        if recent.empty:
+            return 0, None
+        now = intra_df.iloc[-1]
+        score = 0
+        details = {}
+
+        if daily_ctx.get('above_sma200', False):
+            score += w['sma200']; details['above_sma200'] = True
+        else:
+            details['above_sma200'] = False
+
+        details['adx'] = daily_ctx.get('adx', 0.0)
+        if daily_ctx.get('adx_strong', False):
+            score += w['adx_strong']; details['adx_tier'] = 'strong'
+        elif daily_ctx.get('adx_trending', False):
+            score += w['adx_trending']; details['adx_tier'] = 'trending'
+        else:
+            details['adx_tier'] = 'weak'
+
+        details['rs_outperforming'] = bool(daily_ctx.get('rs_outperforming', False))
+        if details['rs_outperforming']:
+            score += w['rs']
+
+        rsi_val = float(now['RSI']) if pd.notna(now.get('RSI')) else np.nan
+        rsi_rising = bool(now.get('RSI_Rising')) if pd.notna(now.get('RSI_Rising')) else False
+        details['rsi'] = rsi_val; details['rsi_rising'] = rsi_rising
+        if pd.notna(rsi_val):
+            if 40 <= rsi_val <= 60 and rsi_rising:
+                score += w['rsi_sweet']; details['rsi_zone'] = 'sweet_spot'
+            elif 60 < rsi_val <= 70:
+                score += w['rsi_warm']; details['rsi_zone'] = 'warm'
+            else:
+                details['rsi_zone'] = 'neutral'
+        else:
+            details['rsi_zone'] = 'na'
+
+        if 'BB_Lower_Bounce' in recent.columns and recent['BB_Lower_Bounce'].any():
+            score += w['bb_bounce']; details['bb_lower_bounce'] = True
+        elif 'BB_Buy' in recent.columns and recent['BB_Buy'].any():
+            score += w['bb_cross']; details['bb_middle_cross'] = True
+
+        if pd.notna(now.get('Volume_Surge')) and bool(now['Volume_Surge']):
+            score += w['vol_surge']; details['volume_surge'] = True
+        elif pd.notna(now.get('Volume_Above_Avg')) and bool(now['Volume_Above_Avg']):
+            score += w['vol_above']; details['volume_above_avg'] = True
+
+        hist_pos = bool(now.get('MACD_Hist_Positive')) if pd.notna(now.get('MACD_Hist_Positive')) else False
+        hist_rising = bool(now.get('MACD_Hist_Rising')) if pd.notna(now.get('MACD_Hist_Rising')) else False
+        if hist_pos and hist_rising:
+            score += w['macd_strong']; details['macd_hist'] = 'strong'
+        elif hist_rising:
+            score += w['macd_improving']; details['macd_hist'] = 'improving'
+        else:
+            details['macd_hist'] = 'neutral'
+
+        price = float(now['Close']) if pd.notna(now.get('Close')) else np.nan
+        daily_atr = daily_ctx.get('daily_atr', np.nan)
+        if pd.notna(price) and pd.notna(daily_atr) and daily_atr > 0:
+            atr_pct = (daily_atr / price) * 100.0
+        else:
+            atr_pct = np.nan
+        bb_pos = float(now['BB_Position']) if pd.notna(now.get('BB_Position')) else np.nan
+        details.update({'price': price, 'daily_atr': daily_atr, 'atr_pct': atr_pct,
+                        'bb_position': bb_pos})
+        return score, details
+
+    return _score
+
+
 def collect_entries(window, subset, frames, provider, base_threshold, max_trades_per_ticker,
                     earnings_dates=None, hold_bars=0,
-                    non_overlapping=False, arrays=None, resolve_fn=None):
+                    non_overlapping=False, arrays=None, resolve_fn=None, score_fn=None):
     """Find every fresh threshold-cross in a window and record the entry (next-bar
     open). No exit logic here, so the same entries can be replayed under any exit.
     Each entry is tagged with whether the hold window would span an earnings date.
@@ -596,7 +683,8 @@ def collect_entries(window, subset, frames, provider, base_threshold, max_trades
                 prev_score = 0
                 continue
 
-            score, details = compute_signal_score(intra_df.iloc[:pos + 1], ctx, lookback_bars=5)
+            scorer = score_fn if score_fn is not None else compute_signal_score
+            score, details = scorer(intra_df.iloc[:pos + 1], ctx, lookback_bars=5)
             crossed = (prev_score < base_threshold) and (score >= base_threshold)
             prev_score = score
             if not crossed or details is None:
@@ -628,7 +716,10 @@ def collect_entries(window, subset, frames, provider, base_threshold, max_trades
                 'regime': regime_label, 'effective_threshold': base_threshold + regime_adjust,
                 'regime_ok': (regime_label != 'risk_off') and (score >= base_threshold + regime_adjust),
                 'rsi': details.get('rsi', np.nan),
+                'bb_position': details.get('bb_position', np.nan),
+                'atr_pct': details.get('atr_pct', np.nan),
                 'above_sma200': details.get('above_sma200', False),
+                'rs_outperforming': details.get('rs_outperforming', False),
                 'adx_tier': details.get('adx_tier', 'weak'),
                 'rsi_zone': details.get('rsi_zone', 'na'),
                 'volume_surge': details.get('volume_surge', False),
@@ -816,6 +907,156 @@ def sweep_thresholds(windows, subset, frames, arrays, provider, lo, hi,
     print(f"{'=' * 84}\n")
 
 
+# Data-driven candidate: drop the inverted BB-bounce bonus and near-useless ADX
+# weight, zero the underperforming RSI-warm band, and boost volume (a real
+# discriminator). Derived from the train-split feature impact.
+CANDIDATE_WEIGHTS = {
+    'sma200': 3, 'adx_strong': 1, 'adx_trending': 1, 'rs': 1,
+    'rsi_sweet': 3, 'rsi_warm': 0, 'bb_bounce': 1, 'bb_cross': 1,
+    'vol_surge': 3, 'vol_above': 1, 'macd_strong': 1, 'macd_improving': 1,
+}
+
+
+def topn_test(entries, arrays, hold_bars, slippage_bps, stop_mult, target_mult, regime_filtered):
+    """Does taking only the top-N highest-scoring signals per day concentrate the edge?"""
+    df = resolve_entries(
+        entries, arrays,
+        (lambda s, t: (lambda *a: resolve_fixed(*a, stop_mult=s, target_mult=t)))(stop_mult, target_mult),
+        hold_bars, slippage_bps,
+    )
+    if df.empty:
+        print("\n  No trades.\n")
+        return
+    if regime_filtered:
+        df = df[df['regime_ok']]
+    df = df.copy()
+    df['date'] = pd.to_datetime(df['entry_time']).dt.date
+
+    print(f"\n{'=' * 72}")
+    print(f"  TOP-N PER DAY RANKING  |  exit {stop_mult}/{target_mult}xATR  |  "
+          f"{'regime-filtered' if regime_filtered else 'all'}")
+    print(f"  (rank each day's signals by score, take the best N; ties broken by volume_surge)")
+    print(f"{'=' * 72}")
+    df['rank_key'] = df['score'] + df['volume_surge'].astype(float) * 0.5
+    print(f"\n  {'N/day':>7} {'trades':>7} {'exp':>9} {'test exp':>9} {'PF':>6} {'win%':>6} {'avg/day':>8}")
+    print(f"  {'-' * 60}")
+    n_days = df['date'].nunique()
+    for n in [1, 2, 3, 5, 10, 9999]:
+        picks = df.sort_values('rank_key', ascending=False).groupby('date').head(n)
+        s = expectancy_stats(picks)
+        ts = expectancy_stats(picks[picks['split'] == 'test'])
+        te = f"{ts['expectancy']:+.3f}" if ts else "  n/a"
+        nd = "all" if n == 9999 else str(n)
+        print(f"  {nd:>7} {s['trades']:>7d} {s['expectancy']:>+9.3f} {te:>9} "
+              f"{s['profit_factor']:>6.2f} {s['win_rate']:>5.1f}% {s['trades']/max(n_days,1):>8.1f}")
+    print(f"\n  {n_days} trading days in sample. Higher exp at small N = ranking concentrates edge.")
+    print(f"{'=' * 72}\n")
+
+
+def reweight_test(windows, subset, frames, arrays, provider, hold_bars, slippage_bps,
+                  stop_mult, target_mult, regime_filtered, max_trades, non_overlapping):
+    """Sweep thresholds for default vs candidate weight maps; fit on train, judge on test."""
+    adopted_exit = (lambda s, t: (lambda *a: resolve_fixed(*a, stop_mult=s, target_mult=t)))(
+        stop_mult, target_mult)
+    configs = [('DEFAULT (max17)', DEFAULT_WEIGHTS, range(8, 14)),
+              ('CANDIDATE (max13)', CANDIDATE_WEIGHTS, range(6, 12))]
+
+    for name, weights, thr_range in configs:
+        scorer = make_param_scorer(weights)
+        print(f"\n{'=' * 80}")
+        print(f"  REWEIGHT TEST — {name}  |  exit {stop_mult}/{target_mult}xATR  |  "
+              f"{'regime-filtered' if regime_filtered else 'all'}")
+        print(f"  {'thr':>4} {'n':>6} {'TRAIN exp':>10} {'TEST exp':>10} {'all exp':>9} {'PF':>6} {'win%':>6}")
+        print(f"  {'-' * 70}")
+        for t in thr_range:
+            entries = []
+            for w in windows:
+                entries.extend(collect_entries(
+                    w, subset, frames, provider, t, max_trades,
+                    hold_bars=hold_bars, non_overlapping=non_overlapping,
+                    arrays=arrays, resolve_fn=adopted_exit, score_fn=scorer))
+            if not entries:
+                print(f"  {t:>4d}      0")
+                continue
+            df = resolve_entries(entries, arrays, adopted_exit, hold_bars, slippage_bps)
+            view = df[df['regime_ok']] if regime_filtered else df
+            if view.empty:
+                print(f"  {t:>4d}      0")
+                continue
+            tr = expectancy_stats(view[view['split'] == 'train'])
+            te = expectancy_stats(view[view['split'] == 'test'])
+            al = expectancy_stats(view)
+            trs = f"{tr['expectancy']:+.3f}" if tr else "   n/a"
+            tes = f"{te['expectancy']:+.3f}" if te else "   n/a"
+            print(f"  {t:>4d} {al['trades']:>6d} {trs:>10} {tes:>10} {al['expectancy']:>+9.3f} "
+                  f"{al['profit_factor']:>6.2f} {al['win_rate']:>5.1f}%")
+    print(f"\n{'=' * 80}\n")
+
+
+def analyze_filters(entries, arrays, hold_bars, slippage_bps, stop_mult, target_mult,
+                    regime_filtered):
+    """Resolve entries once, then show expectancy bucketed by numeric features and
+    categorical flags — the data that drives Step 4 filters and category re-weighting."""
+    df = resolve_entries(
+        entries, arrays,
+        (lambda s, t: (lambda *a: resolve_fixed(*a, stop_mult=s, target_mult=t)))(stop_mult, target_mult),
+        hold_bars, slippage_bps,
+    )
+    if df.empty:
+        print("\n  No trades.\n")
+        return
+    if regime_filtered:
+        df = df[df['regime_ok']]
+    label = "regime-filtered" if regime_filtered else "all signals"
+    print(f"\n{'=' * 78}")
+    print(f"  FILTER / FEATURE IMPACT  |  exit {stop_mult}/{target_mult}xATR  |  {label}")
+    print(f"  (test-split expectancy in parens to check robustness)")
+    print(f"{'=' * 78}")
+
+    def _line(name, sub):
+        s = expectancy_stats(sub)
+        if not s:
+            print(f"    {name:24s}    0 trades")
+            return
+        ts = expectancy_stats(sub[sub['split'] == 'test'])
+        te = f"{ts['expectancy']:+.3f}" if ts else "  n/a"
+        print(f"    {name:24s} n={s['trades']:5d}  exp={s['expectancy']:+.3f}R "
+              f"(test {te})  win={s['win_rate']:4.1f}%  PF={s['profit_factor']:.2f}")
+
+    def _numeric(field, edges):
+        print(f"\n  --- by {field} ---")
+        col = df[field]
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            sub = df[(col >= lo) & (col < hi)]
+            _line(f"[{lo:g}, {hi:g})", sub)
+
+    _numeric('bb_position', [-50, 0, 20, 40, 60, 80, 100, 200])
+    _numeric('atr_pct', [0, 1, 2, 3, 4, 6, 100])
+    _numeric('rsi', [0, 30, 40, 50, 60, 70, 100])
+
+    for cat in ['adx_tier', 'rsi_zone', 'macd_hist']:
+        print(f"\n  --- by {cat} ---")
+        for val in df[cat].dropna().unique():
+            _line(str(val), df[df[cat] == val])
+
+    for flag in ['above_sma200', 'rs_outperforming', 'volume_surge', 'bb_lower_bounce']:
+        if flag not in df.columns:
+            continue
+        print(f"\n  --- {flag} ---")
+        _line("True", df[df[flag] == True])
+        _line("False", df[df[flag] != True])
+
+    print(f"\n  --- candidate Step-4 entry filters (vs unfiltered baseline) ---")
+    _line("baseline (no filter)", df)
+    _line("atr_pct >= 1.0", df[df['atr_pct'] >= 1.0])
+    _line("bb_position <= 90", df[df['bb_position'] <= 90])
+    _line("rsi <= 70", df[df['rsi'] <= 70])
+    combo = df[(df['atr_pct'] >= 1.0) & (df['bb_position'] <= 90) & (df['rsi'] <= 70)]
+    _line("ALL three combined", combo)
+
+    print(f"{'=' * 78}\n")
+
+
 def compare_earnings_blackout(entries, arrays, hold_bars, slippage_bps,
                               stop_mult, target_mult, regime_filtered):
     """Resolve all entries once, then split by whether the hold spans earnings."""
@@ -925,6 +1166,12 @@ def main():
                         help="Measure impact of vetoing entries held through earnings")
     parser.add_argument("--non-overlapping", action="store_true",
                         help="Realistic: one position per ticker at a time (no pyramiding)")
+    parser.add_argument("--filter-analysis", action="store_true",
+                        help="Bucket expectancy by features/flags to design entry filters")
+    parser.add_argument("--reweight-test", action="store_true",
+                        help="A/B the default vs candidate score weights across thresholds")
+    parser.add_argument("--topn-test", action="store_true",
+                        help="Test taking only the top-N highest-scoring signals per day")
     args = parser.parse_args()
 
     windows = WINDOWS_1H if args.interval in ('1h', '60m') else _recent_15m_windows()
@@ -972,7 +1219,17 @@ def main():
         entries.extend(ent)
         print(f"  {w['name']:14s} -> {len(ent):4d} entries")
 
-    if args.earnings_blackout:
+    if args.topn_test:
+        topn_test(entries, arrays, hold_bars, args.slippage_bps,
+                  args.stop_mult, args.target_mult, args.regime_filtered)
+    elif args.reweight_test:
+        reweight_test(windows, subset, frames, arrays, provider, hold_bars, args.slippage_bps,
+                      args.stop_mult, args.target_mult, args.regime_filtered,
+                      max_trades, args.non_overlapping)
+    elif args.filter_analysis:
+        analyze_filters(entries, arrays, hold_bars, args.slippage_bps,
+                        args.stop_mult, args.target_mult, args.regime_filtered)
+    elif args.earnings_blackout:
         compare_earnings_blackout(entries, arrays, hold_bars, args.slippage_bps,
                                   args.stop_mult, args.target_mult, args.regime_filtered)
     elif args.sweep_thresholds:
