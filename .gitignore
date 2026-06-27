@@ -8,14 +8,7 @@ trade_log.csv
 backtest_summary.csv
 *.csv
 *.ipynb
-EOFcat > .gitignore << 'EOF'
-.stock_screener.env
-*.env
-__pycache__/
-*.pyc
-*.json.gz
-alert_log.csv
-trade_log.csv
-backtest_summary.csv
-*.csv
-*.ipynb
+
+# Backtest data cache (large; regenerated on demand)
+data_cache/
+*.pkl
