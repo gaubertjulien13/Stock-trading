@@ -43,6 +43,20 @@ DAILY_CONTEXT = {}              # Pre-computed daily trend context per ticker
 DAILY_CACHE_DATE = None         # Calendar date of last daily refresh
 SPY_DAILY_CLOSE = None          # SPY daily close series for relative strength
 MARKET_REGIME = None            # Market-wide regime dict (risk_on / caution / risk_off)
+SECTOR_RET5 = {}                # Sector ETF -> trailing 5-day return % (daily refresh)
+
+# GICS / yfinance sector names -> SPDR sector ETF proxy (for the sector kill switch).
+SECTOR_ETF = {
+    'Information Technology': 'XLK', 'Technology': 'XLK',
+    'Financials': 'XLF', 'Financial Services': 'XLF',
+    'Health Care': 'XLV', 'Healthcare': 'XLV',
+    'Consumer Discretionary': 'XLY', 'Consumer Cyclical': 'XLY',
+    'Consumer Staples': 'XLP', 'Consumer Defensive': 'XLP',
+    'Energy': 'XLE', 'Industrials': 'XLI',
+    'Materials': 'XLB', 'Basic Materials': 'XLB',
+    'Real Estate': 'XLRE', 'Utilities': 'XLU',
+    'Communication Services': 'XLC', 'Telecommunications': 'XLC',
+}
 
 BATCH_SIZE = 20
 MIN_AVG_VOLUME_20 = 150_000
@@ -370,7 +384,7 @@ def refresh_daily_context(tickers, batch_size=20):
     Also computes market regime from SPY data.
     Cached for the calendar day — skipped if already fresh.
     """
-    global DAILY_DATA, DAILY_CONTEXT, DAILY_CACHE_DATE, SPY_DAILY_CLOSE, MARKET_REGIME
+    global DAILY_DATA, DAILY_CONTEXT, DAILY_CACHE_DATE, SPY_DAILY_CLOSE, MARKET_REGIME, SECTOR_RET5
 
     today = datetime.today().date()
     if DAILY_CACHE_DATE == today and DAILY_CONTEXT:
@@ -394,6 +408,31 @@ def refresh_daily_context(tickers, batch_size=20):
     except Exception as e:
         print(f"  ⚠️  Failed to download SPY daily data: {e}")
         SPY_DAILY_CLOSE = None
+
+    # Sector ETFs for the sector-level kill switch (trailing 5-day return each)
+    SECTOR_RET5 = {}
+    try:
+        etfs = sorted(set(SECTOR_ETF.values()))
+        etf_raw = yf.download(etfs, start=daily_start, end=daily_end,
+                              progress=False, group_by='ticker', threads=True)
+        if etf_raw is not None and not etf_raw.empty:
+            for etf in etfs:
+                try:
+                    sub = _slice_from_batch(etf_raw, etf)
+                    if sub is None or sub.empty:
+                        continue
+                    close_e, _, _, _ = _extract_cols(sub, ticker=etf)
+                    r5 = close_e.pct_change(5).iloc[-1]
+                    if pd.notna(r5):
+                        SECTOR_RET5[etf] = float(r5 * 100.0)
+                except Exception:
+                    continue
+        weak = {k: v for k, v in SECTOR_RET5.items() if v <= -5.0}
+        if weak:
+            print(f"  🔻 Weak sectors (5d <= -5%): "
+                  + ", ".join(f"{k} {v:+.1f}%" for k, v in sorted(weak.items(), key=lambda x: x[1])))
+    except Exception as e:
+        print(f"  ⚠️  Failed to download sector ETF data: {e}")
 
     for batch in _chunks(tickers, batch_size):
         try:
@@ -443,6 +482,13 @@ def refresh_daily_context(tickers, batch_size=20):
                     if pd.notna(tkr_ret) and pd.notna(spy_ret):
                         rs_outperforming = bool(tkr_ret > spy_ret)
 
+            # -- 5-day return (momentum band / falling-knife guard) --
+            ret_5d = 0.0
+            if len(close_col) >= 6:
+                r5 = close_col.pct_change(5).iloc[-1]
+                if pd.notna(r5):
+                    ret_5d = float(r5 * 100.0)
+
             DAILY_CONTEXT[tkr] = {
                 'above_sma200': above_sma200,
                 'sma200': sma200_val,
@@ -452,6 +498,7 @@ def refresh_daily_context(tickers, batch_size=20):
                 'adx_strong': adx_val > 35,
                 'daily_atr': daily_atr,
                 'rs_outperforming': rs_outperforming,
+                'ret_5d': ret_5d,
             }
         except Exception:
             continue
@@ -762,7 +809,8 @@ _CSV_HEADER = [
     'stop_1x', 'stop_1_5x', 'stop_2x', 'target_2x', 'target_3x', 'rr_ratio',
     'above_sma200', 'adx', 'adx_tier', 'rs_outperforming',
     'volume_surge', 'bb_lower_bounce', 'macd_hist',
-    'next_earnings', 'news_sentiment', 'news_label', 'news_headline', 'veto_reason',
+    'stk_ret_5d', 'sector_ret_5d', 'next_earnings', 'news_sentiment', 'news_label',
+    'news_headline', 'veto_reason',
 ]
 
 
@@ -804,6 +852,8 @@ def log_alert_to_csv(log_path, ticker, score, details, company_name, sector):
             details.get('volume_surge', ''),
             details.get('bb_lower_bounce', ''),
             details.get('macd_hist', ''),
+            _fmt(details.get('stk_ret_5d'), 2),
+            _fmt(details.get('sector_ret_5d'), 2),
             details.get('next_earnings', ''),
             _fmt(details.get('news_sentiment'), 3),
             details.get('news_label', ''),
@@ -934,6 +984,8 @@ def _build_alert_body(tkr, company_name, sector, score, details, interval, thres
         secondary target: 2.0x ${_safe(details.get('target_2x'))}
 
         === News & Events ===
+        5-day move:       {_safe(details.get('stk_ret_5d'), '+.1f')}%  (band-checked)
+        Sector ETF 5d:    {_safe(details.get('sector_ret_5d'), '+.1f')}%  (guard-checked)
         Next earnings:    {details.get('next_earnings') or 'unknown'}
         News sentiment:   {details.get('news_label', 'n/a')} ({_safe(details.get('news_sentiment'), '+.2f') if details.get('news_sentiment') is not None else 'n/a'})
         Latest headline:  {details.get('news_headline') or '(none in window)'}
@@ -979,6 +1031,11 @@ def run_cli(args):
     print(f"📰 Earnings blackout: {'ON' if args.earnings_blackout else 'OFF'} "
           f"(<= {args.earnings_blackout_days}d)  |  News veto: {'ON' if args.news_veto else 'OFF'} "
           f"(last {args.news_lookback_hours}h)")
+    print(f"🔪 Momentum band: {'ON' if args.momentum_band else 'OFF'} "
+          f"(veto if 5d move outside {args.band_min:+.0f}%..{args.band_max:+.0f}%)")
+    print(f"🏭 Sector guard: {'ON' if args.sector_guard else 'OFF'} "
+          f"(veto if sector ETF 5d <= {args.sector_min:+.0f}%)  |  "
+          f"Caution regime: {'SKIP ALL' if args.skip_caution else 'raise threshold'}")
 
     LAST_SCORE = {}
     LAST_ALERT_TS = {}
@@ -1032,6 +1089,13 @@ def run_cli(args):
                     continue
 
                 if regime == 'caution':
+                    if args.skip_caution:
+                        # Backtest: caution-regime entries lost money even at the
+                        # raised threshold (-0.11R vs +0.19R in risk_on). Sitting
+                        # out beats trading them.
+                        print("  🟡 CAUTION — alerts suppressed (validated: caution trades are -EV)")
+                        time.sleep(max(15, int(args.poll_secs)))
+                        continue
                     print(f"  🟡 CAUTION — threshold raised to {effective_threshold} (from {SCORE_THRESHOLD})")
 
                 now_ts = time.time()
@@ -1091,7 +1155,27 @@ def run_cli(args):
                                 # --- Event/news vetoes (evaluated only for genuine candidates) ---
                                 veto_reason = ""
 
-                                if args.earnings_blackout:
+                                # Momentum band (falling-knife / chase guard). Backtest
+                                # validated: expectancy concentrates in mild dips; 5d
+                                # moves beyond -6%/+6% underperform badly out-of-sample.
+                                if args.momentum_band:
+                                    ret_5d = daily_ctx.get('ret_5d', 0.0)
+                                    details['stk_ret_5d'] = ret_5d
+                                    if not (args.band_min < ret_5d < args.band_max):
+                                        direction = "falling knife" if ret_5d <= args.band_min else "over-extended"
+                                        veto_reason = f"5d move {ret_5d:+.1f}% outside band ({direction})"
+
+                                # Sector kill switch: skip buys whose sector ETF is in
+                                # freefall (backtest: sector 5d <= -5% trades were -0.29R).
+                                if not veto_reason and args.sector_guard:
+                                    etf = SECTOR_ETF.get(str(sector).strip())
+                                    sec_r5 = SECTOR_RET5.get(etf) if etf else None
+                                    if sec_r5 is not None:
+                                        details['sector_ret_5d'] = sec_r5
+                                        if sec_r5 <= args.sector_min:
+                                            veto_reason = f"sector crash ({etf} 5d {sec_r5:+.1f}%)"
+
+                                if not veto_reason and args.earnings_blackout:
                                     try:
                                         in_blackout, next_earn = earnings_blackout_status(
                                             tkr, args.earnings_blackout_days)
@@ -1254,6 +1338,19 @@ if __name__ == "__main__":
                         help="Veto buys with strongly negative recent news (default: on).")
     parser.add_argument("--news-lookback-hours", type=int, default=72,
                         help="How far back to scan headlines for sentiment (default: 72h).")
+    parser.add_argument("--momentum-band", action=argparse.BooleanOptionalAction, default=True,
+                        help="Veto buys whose 5-day move is outside the validated band (default: on).")
+    parser.add_argument("--band-min", type=float, default=-6.0,
+                        help="Lower bound of 5-day return band, %% (default: -6).")
+    parser.add_argument("--band-max", type=float, default=6.0,
+                        help="Upper bound of 5-day return band, %% (default: +6).")
+    parser.add_argument("--sector-guard", action=argparse.BooleanOptionalAction, default=True,
+                        help="Veto buys whose sector ETF is crashing (default: on).")
+    parser.add_argument("--sector-min", type=float, default=-5.0,
+                        help="Veto if sector ETF 5-day return <= this %% (default: -5).")
+    parser.add_argument("--skip-caution", action=argparse.BooleanOptionalAction, default=True,
+                        help="Suppress all alerts in caution regime (default: on; "
+                             "backtest shows caution trades lose money).")
 
     args = parser.parse_args()
 

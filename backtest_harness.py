@@ -181,6 +181,77 @@ def load_earnings(tickers, refresh=False):
     return cached
 
 
+# GICS (constituents CSV) and yfinance sector names -> SPDR sector ETF proxy.
+SECTOR_ETF = {
+    'Information Technology': 'XLK', 'Technology': 'XLK',
+    'Financials': 'XLF', 'Financial Services': 'XLF',
+    'Health Care': 'XLV', 'Healthcare': 'XLV',
+    'Consumer Discretionary': 'XLY', 'Consumer Cyclical': 'XLY',
+    'Consumer Staples': 'XLP', 'Consumer Defensive': 'XLP',
+    'Energy': 'XLE', 'Industrials': 'XLI',
+    'Materials': 'XLB', 'Basic Materials': 'XLB',
+    'Real Estate': 'XLRE', 'Utilities': 'XLU',
+    'Communication Services': 'XLC', 'Telecommunications': 'XLC',
+}
+
+
+def load_sector_map(refresh=False):
+    """{ticker: GICS sector} from the same constituents CSV used for tickers."""
+    path = _cache_path("sectors", "map")
+    if not refresh and os.path.exists(path):
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    import requests
+    from io import StringIO
+    url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+    df = pd.read_csv(StringIO(requests.get(url, timeout=20).text))
+    m = {str(s).strip().replace('.', '-').upper(): sec
+         for s, sec in zip(df['Symbol'], df['GICS Sector'])}
+    with open(path, "wb") as f:
+        pickle.dump(m, f)
+    return m
+
+
+class SectorProvider:
+    """As-of 5-day returns for the 11 SPDR sector ETFs (lookahead-safe)."""
+
+    def __init__(self, refresh=False):
+        etfs = sorted(set(SECTOR_ETF.values()))
+        path = _cache_path("daily", "sector_etfs")
+        if not refresh and os.path.exists(path):
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+        else:
+            end = datetime.today()
+            start = end - timedelta(days=3 * 365 + 60)
+            data = _download_batched(etfs, start=start, end=end)
+            with open(path, "wb") as f:
+                pickle.dump(data, f)
+        self.ret5 = {}
+        self.dates = {}
+        for etf, df in data.items():
+            try:
+                close, _, _, _ = _extract_cols(df, ticker=etf)
+                idx = close.index
+                idx = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
+                self.ret5[etf] = (close.pct_change(5) * 100.0).to_numpy()
+                self.dates[etf] = idx.values.astype('datetime64[D]')
+            except Exception:
+                continue
+
+    def get(self, sector_name, trade_date):
+        """Sector ETF 5d return %, as of the last completed daily bar before trade_date."""
+        etf = SECTOR_ETF.get(sector_name)
+        if etf is None or etf not in self.ret5:
+            return np.nan
+        d = np.datetime64(pd.Timestamp(trade_date).normalize(), 'D')
+        pos = np.searchsorted(self.dates[etf], d, side='left') - 1
+        if pos < 0:
+            return np.nan
+        v = self.ret5[etf][pos]
+        return float(v) if np.isfinite(v) else np.nan
+
+
 def load_spy_daily(refresh=False):
     path = _cache_path("daily", "SPY")
     if not refresh and os.path.exists(path):
@@ -264,6 +335,9 @@ class DailyContextProvider:
                     rs_vals = (tkr_ret20 > aligned_spy) & tkr_ret20.notna() & aligned_spy.notna()
                     rs_out = pd.Series(rs_vals.values, index=close.index)
 
+                sma20 = close.rolling(20, min_periods=20).mean()
+                ret5 = close.pct_change(5) * 100.0
+
                 frame = pd.DataFrame({
                     'above_sma200': above.values,
                     'sma200': sma200.values,
@@ -271,6 +345,8 @@ class DailyContextProvider:
                     'adx': adx_series.values,
                     'daily_atr': atr_series.values,
                     'rs_outperforming': rs_out.values,
+                    'above_sma20': (close > sma20).values,
+                    'ret_5d': ret5.values,
                 }, index=idx)
                 frame['adx_trending'] = frame['adx'] > 25
                 frame['adx_strong'] = frame['adx'] > 35
@@ -346,6 +422,8 @@ class DailyContextProvider:
             'adx_strong': bool(row['adx_strong']),
             'daily_atr': float(row['daily_atr']) if np.isfinite(row['daily_atr']) else np.nan,
             'rs_outperforming': bool(row['rs_outperforming']),
+            'above_sma20': bool(row['above_sma20']),
+            'ret_5d': float(row['ret_5d']) if np.isfinite(row['ret_5d']) else 0.0,
         }
 
     def regime(self, trade_date):
@@ -650,7 +728,8 @@ def make_param_scorer(weights):
 
 def collect_entries(window, subset, frames, provider, base_threshold, max_trades_per_ticker,
                     earnings_dates=None, hold_bars=0,
-                    non_overlapping=False, arrays=None, resolve_fn=None, score_fn=None):
+                    non_overlapping=False, arrays=None, resolve_fn=None, score_fn=None,
+                    sector_map=None, sector_provider=None):
     """Find every fresh threshold-cross in a window and record the entry (next-bar
     open). No exit logic here, so the same entries can be replayed under any exit.
     Each entry is tagged with whether the hold window would span an earnings date.
@@ -718,6 +797,11 @@ def collect_entries(window, subset, frames, provider, base_threshold, max_trades
                 'rsi': details.get('rsi', np.nan),
                 'bb_position': details.get('bb_position', np.nan),
                 'atr_pct': details.get('atr_pct', np.nan),
+                'stk_above_sma20': ctx.get('above_sma20', False),
+                'stk_ret_5d': ctx.get('ret_5d', 0.0),
+                'sector': sector_map.get(tkr, 'Unknown') if sector_map else 'Unknown',
+                'sector_ret_5d': (sector_provider.get(sector_map.get(tkr, ''), trade_date)
+                                  if (sector_map and sector_provider) else np.nan),
                 'above_sma200': details.get('above_sma200', False),
                 'rs_outperforming': details.get('rs_outperforming', False),
                 'adx_tier': details.get('adx_tier', 'weak'),
@@ -917,6 +1001,65 @@ CANDIDATE_WEIGHTS = {
 }
 
 
+def sector_regime_analysis(entries, arrays, hold_bars, slippage_bps, stop_mult, target_mult,
+                           regime_filtered):
+    """Validate: (a) sector-ETF momentum veto, (b) per-day sector caps,
+    (c) regime-dependent exits (tighter target in caution)."""
+    mk = lambda s, t: (lambda *a: resolve_fixed(*a, stop_mult=s, target_mult=t))
+    df3 = resolve_entries(entries, arrays, mk(stop_mult, target_mult), hold_bars, slippage_bps)
+    df2 = resolve_entries(entries, arrays, mk(stop_mult, 2.0), hold_bars, slippage_bps)
+    if df3.empty:
+        print("\n  No trades.\n")
+        return
+    if regime_filtered:
+        keep = df3['regime_ok']
+        df3, df2 = df3[keep], df2[keep.values]
+    for d in (df3, df2):
+        d['date'] = pd.to_datetime(d['entry_time']).dt.date
+
+    print(f"\n{'=' * 78}")
+    print(f"  SECTOR & REGIME ANALYSIS  |  exit {stop_mult}/{target_mult}xATR  |  "
+          f"{'regime-filtered' if regime_filtered else 'all'}")
+    print(f"{'=' * 78}")
+
+    def _line(name, sub):
+        s = expectancy_stats(sub)
+        if not s:
+            print(f"    {name:30s}    0 trades")
+            return
+        ts = expectancy_stats(sub[sub['split'] == 'test'])
+        te = f"{ts['expectancy']:+.3f}" if ts else "  n/a"
+        print(f"    {name:30s} n={s['trades']:5d}  exp={s['expectancy']:+.3f}R "
+              f"(test {te})  win={s['win_rate']:4.1f}%  PF={s['profit_factor']:.2f}")
+
+    print(f"\n  --- (a) by sector-ETF 5d return at entry ---")
+    col = df3['sector_ret_5d']
+    for lo, hi in [(-100, -5), (-5, -3), (-3, 0), (0, 3), (3, 100)]:
+        _line(f"sector 5d in [{lo:g}, {hi:g})", df3[(col >= lo) & (col < hi)])
+    for thr in (-3.0, -4.0, -5.0):
+        _line(f"VETO if sector 5d <= {thr:g}%", df3[~(col <= thr)])
+
+    print(f"\n  --- (b) per-day sector cap (chronological first-N) ---")
+    _line("no cap", df3)
+    for cap in (3, 2, 1):
+        capped = (df3.sort_values('entry_time')
+                  .groupby(['date', 'sector']).head(cap))
+        _line(f"max {cap}/sector/day", capped)
+
+    print(f"\n  --- (c) regime-dependent exits ---")
+    caution3 = df3[df3['regime'] == 'caution']
+    caution2 = df2[df2['regime'] == 'caution']
+    riskon3 = df3[df3['regime'] == 'risk_on']
+    _line("risk_on trades @ 3x target", riskon3)
+    _line("caution trades @ 3x target", caution3)
+    _line("caution trades @ 2x target", caution2)
+    _line("caution trades SKIPPED", riskon3)
+    blended = pd.concat([riskon3, caution2])
+    _line("BLEND: 3x risk_on + 2x caution", blended)
+    _line("baseline: 3x everywhere", df3)
+    print(f"{'=' * 78}\n")
+
+
 def topn_test(entries, arrays, hold_bars, slippage_bps, stop_mult, target_mult, regime_filtered):
     """Does taking only the top-N highest-scoring signals per day concentrate the edge?"""
     df = resolve_entries(
@@ -1054,6 +1197,24 @@ def analyze_filters(entries, arrays, hold_bars, slippage_bps, stop_mult, target_
     combo = df[(df['atr_pct'] >= 1.0) & (df['bb_position'] <= 90) & (df['rsi'] <= 70)]
     _line("ALL three combined", combo)
 
+    print(f"\n  --- falling-knife guard (stock-level short-term momentum) ---")
+    _numeric('stk_ret_5d', [-100, -10, -6, -3, 0, 3, 6, 100])
+    print()
+    _line("stk 5d ret > -6%", df[df['stk_ret_5d'] > -6.0])
+    _line("stk 5d ret > -3%", df[df['stk_ret_5d'] > -3.0])
+    _line("stk above SMA20", df[df['stk_above_sma20'] == True])
+    _line("stk BELOW SMA20", df[df['stk_above_sma20'] != True])
+    knife = df[(df['stk_ret_5d'] > -6.0) & (df['stk_above_sma20'] == True)]
+    _line("ret>-6% AND >SMA20", knife)
+    _line("band -6% < ret < +6%", df[(df['stk_ret_5d'] > -6.0) & (df['stk_ret_5d'] < 6.0)])
+
+    for lo_sc in (11, 14):
+        hi = df[df['score'] >= lo_sc]
+        print(f"\n  score >= {lo_sc} slice:")
+        _line("  baseline", hi)
+        _line("  + knife (ret>-6%)", hi[hi['stk_ret_5d'] > -6.0])
+        _line("  + band (-6..+6%)", hi[(hi['stk_ret_5d'] > -6.0) & (hi['stk_ret_5d'] < 6.0)])
+
     print(f"{'=' * 78}\n")
 
 
@@ -1172,6 +1333,8 @@ def main():
                         help="A/B the default vs candidate score weights across thresholds")
     parser.add_argument("--topn-test", action="store_true",
                         help="Test taking only the top-N highest-scoring signals per day")
+    parser.add_argument("--sector-analysis", action="store_true",
+                        help="Validate sector-ETF veto, sector caps, and regime-dependent exits")
     args = parser.parse_args()
 
     windows = WINDOWS_1H if args.interval in ('1h', '60m') else _recent_15m_windows()
@@ -1208,6 +1371,12 @@ def main():
         args.stop_mult, args.target_mult)
     max_trades = 999 if args.non_overlapping else args.max_trades
 
+    sector_map = sector_provider = None
+    if args.sector_analysis:
+        print("\n  loading sector map + sector ETF history...")
+        sector_map = load_sector_map(refresh=args.refresh)
+        sector_provider = SectorProvider(refresh=args.refresh)
+
     print(f"\nStep 4/4: collecting entries across {len(windows)} window(s)"
           f"{' (non-overlapping)' if args.non_overlapping else ''}...")
     entries = []
@@ -1215,11 +1384,15 @@ def main():
         ent = collect_entries(w, subset, frames, provider, args.threshold, max_trades,
                               earnings_dates=earnings_dates, hold_bars=hold_bars,
                               non_overlapping=args.non_overlapping, arrays=arrays,
-                              resolve_fn=adopted_exit)
+                              resolve_fn=adopted_exit,
+                              sector_map=sector_map, sector_provider=sector_provider)
         entries.extend(ent)
         print(f"  {w['name']:14s} -> {len(ent):4d} entries")
 
-    if args.topn_test:
+    if args.sector_analysis:
+        sector_regime_analysis(entries, arrays, hold_bars, args.slippage_bps,
+                               args.stop_mult, args.target_mult, args.regime_filtered)
+    elif args.topn_test:
         topn_test(entries, arrays, hold_bars, args.slippage_bps,
                   args.stop_mult, args.target_mult, args.regime_filtered)
     elif args.reweight_test:
