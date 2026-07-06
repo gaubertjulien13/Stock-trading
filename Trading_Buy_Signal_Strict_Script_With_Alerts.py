@@ -875,6 +875,51 @@ def _market_open_now():
     return dt_time(6, 30) <= now.time() <= dt_time(13, 0)
 
 
+def _parse_hhmm(s):
+    from datetime import time as dt_time
+    hh, mm = s.strip().split(":")
+    return dt_time(int(hh), int(mm))
+
+
+def build_daily_picks(log_path, min_score, max_picks):
+    """Rank today's logged (non-vetoed) signals using pick_daily_alerts logic.
+    Returns (picks_df, alternates_df) or (None, None) if nothing to rank yet."""
+    from pick_daily_alerts import rank_alerts
+    if not os.path.exists(log_path):
+        return None, None
+    df = pd.read_csv(log_path)
+    day = datetime.now(ZoneInfo("America/Los_Angeles")).strftime('%Y-%m-%d')
+    df = df[df['timestamp'].str.startswith(day)]
+    df = df[df['veto_reason'].fillna('') == '']
+    df = df[pd.to_numeric(df['score'], errors='coerce') >= min_score]
+    if df.empty:
+        return None, None
+    return rank_alerts(df, max_picks=max_picks)
+
+
+def _format_picks_body(picks, alternates, max_picks):
+    lines = [f"Top {len(picks)} picks (one per sector, mild-dip & volume-surge first):", ""]
+    for i, (_, r) in enumerate(picks.iterrows(), 1):
+        why = []
+        r5 = r.get('stk_ret_5d')
+        if pd.notna(r5):
+            why.append(f"5d {float(r5):+.1f}%" + (" (mild dip)" if r.get('mild_dip') else ""))
+        if r.get('vol_surge'):
+            why.append("volume surge")
+        why.append(f"score {float(r['score']):.0f}")
+        lines.append(f"{i}. {r['ticker']:6s} ${float(r['price']):.2f}  "
+                     f"{str(r.get('sector', '?'))}  [{', '.join(why)}]")
+        lines.append(f"   stop ${float(r['stop_1x']):.2f}  |  target ${float(r['target_3x']):.2f}")
+        lines.append("")
+    if alternates is not None and len(alternates):
+        alt = ", ".join(f"{r.ticker}({float(r.score):.0f})"
+                        for r in alternates.head(8).itertuples())
+        lines.append(f"Alternates: {alt}")
+    lines.append("")
+    lines.append("Individual alert emails start now. Full pool: alert_log.csv")
+    return "\n".join(lines)
+
+
 # =========================
 # Build alert email body
 # =========================
@@ -1039,6 +1084,9 @@ def run_cli(args):
     print(f"📧 Email tier: {'mild-dip only' if args.email_mild_dip_only else 'all signals'}, "
           f"max {args.max_emails_per_day}/day, {args.max_emails_per_sector}/sector/day "
           f"(all signals still logged to CSV)")
+    if args.daily_picks:
+        print(f"📋 Daily picks: quiet until {args.picks_time} PT, then top-{args.picks_count} "
+              f"picks email; individual alerts resume after")
 
     LAST_SCORE = {}
     LAST_ALERT_TS = {}
@@ -1050,6 +1098,10 @@ def run_cli(args):
     emails_today = 0
     emails_by_sector = {}
     log_path = args.alert_log
+
+    # Daily picks: quiet period until picks_time, then one ranked summary email.
+    picks_time = _parse_hhmm(args.picks_time)
+    picks_sent_day = None
 
     if args.universe.lower() == "nasdaq":
         tickers = get_nasdaq_composite_tickers()
@@ -1107,6 +1159,33 @@ def run_cli(args):
                         time.sleep(max(15, int(args.poll_secs)))
                         continue
                     print(f"  🟡 CAUTION — threshold raised to {effective_threshold} (from {SCORE_THRESHOLD})")
+
+                # Daily-picks flow: before picks_time, individual alert emails
+                # are held (signals still scanned + logged). At picks_time, one
+                # ranked "DAILY PICKS" email goes out; then live emails resume.
+                quiet_period = False
+                if args.daily_picks:
+                    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+                    if now_pt.time() < picks_time:
+                        quiet_period = True
+                    elif picks_sent_day != now_pt.date():
+                        picks, alts = build_daily_picks(log_path, SCORE_THRESHOLD, args.picks_count)
+                        if picks is None or not len(picks):
+                            print(f"  📋 Picks due ({args.picks_time}) but no candidates logged yet — retrying next scan")
+                        else:
+                            subj = (f"DAILY PICKS {now_pt.strftime('%Y-%m-%d')}: "
+                                    + ", ".join(picks['ticker'].tolist()))
+                            body = _format_picks_body(picks, alts, args.picks_count)
+                            try:
+                                send_email_alert(
+                                    args.smtp_host, args.smtp_port,
+                                    smtp_user=smtp_user, smtp_pass=smtp_pass,
+                                    to_list=to_list, subject=subj, body=body,
+                                )
+                                picks_sent_day = now_pt.date()
+                                print(f"  📋 DAILY PICKS sent: {', '.join(picks['ticker'].tolist())}")
+                            except Exception as ee:
+                                print(f"  ⚠️  Daily picks email failed: {ee}")
 
                 now_ts = time.time()
                 alerts_sent = 0
@@ -1223,7 +1302,9 @@ def run_cli(args):
                                     ret_5d = details.get('stk_ret_5d', daily_ctx.get('ret_5d', 0.0))
                                     sec_key = str(sector).strip() or 'Unknown'
                                     skip_email = ""
-                                    if args.email_mild_dip_only and not (args.band_min < ret_5d < 0.0):
+                                    if quiet_period:
+                                        skip_email = f"quiet period until picks email at {args.picks_time}"
+                                    elif args.email_mild_dip_only and not (args.band_min < ret_5d < 0.0):
                                         skip_email = f"5d {ret_5d:+.1f}% not a mild dip ({args.band_min:g}%..0%)"
                                     elif emails_today >= args.max_emails_per_day:
                                         skip_email = f"daily email cap ({args.max_emails_per_day}) reached"
@@ -1394,6 +1475,13 @@ if __name__ == "__main__":
                         help="Hard cap on alert emails per day (default: 6).")
     parser.add_argument("--max-emails-per-sector", type=int, default=2,
                         help="Max alert emails per sector per day (default: 2).")
+    parser.add_argument("--daily-picks", action=argparse.BooleanOptionalAction, default=True,
+                        help="Hold alert emails until --picks-time, then send one ranked "
+                             "DAILY PICKS email; live emails resume after (default: on).")
+    parser.add_argument("--picks-time", type=str, default="07:30",
+                        help="Local (Pacific) HH:MM to send the daily picks email (default: 07:30).")
+    parser.add_argument("--picks-count", type=int, default=3,
+                        help="Number of picks in the daily picks email (default: 3).")
 
     args = parser.parse_args()
 
