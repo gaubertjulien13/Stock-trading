@@ -1036,9 +1036,19 @@ def run_cli(args):
     print(f"🏭 Sector guard: {'ON' if args.sector_guard else 'OFF'} "
           f"(veto if sector ETF 5d <= {args.sector_min:+.0f}%)  |  "
           f"Caution regime: {'SKIP ALL' if args.skip_caution else 'raise threshold'}")
+    print(f"📧 Email tier: {'mild-dip only' if args.email_mild_dip_only else 'all signals'}, "
+          f"max {args.max_emails_per_day}/day, {args.max_emails_per_sector}/sector/day "
+          f"(all signals still logged to CSV)")
 
     LAST_SCORE = {}
     LAST_ALERT_TS = {}
+
+    # Daily email budget (reset each calendar day). Everything above threshold
+    # is still logged to CSV for pick_daily_alerts.py; only the highest-quality
+    # signals consume the email budget.
+    email_day = None
+    emails_today = 0
+    emails_by_sector = {}
     log_path = args.alert_log
 
     if args.universe.lower() == "nasdaq":
@@ -1202,24 +1212,49 @@ def run_cli(args):
                                     print(f"  🚫 VETOED [{score}pts]: {tkr} — {veto_reason}")
                                     log_alert_to_csv(log_path, tkr, score, details, company_name, sector)
                                 else:
-                                    regime_tag = f" [{regime.upper()}]" if regime == 'caution' else ""
-                                    subj = f"BUY [{score}pts]{regime_tag}: {tkr} {company_name} — {args.interval}"
-                                    body = _build_alert_body(
-                                        tkr, company_name, sector, score,
-                                        details, args.interval, effective_threshold,
-                                    )
+                                    # --- Email quality tier + daily budget ---
+                                    # CSV logs every signal (pick helper sees the
+                                    # full pool); email is reserved for the traits
+                                    # that carried the edge in backtests.
+                                    today_key = datetime.now().date()
+                                    if email_day != today_key:
+                                        email_day, emails_today, emails_by_sector = today_key, 0, {}
 
-                                    try:
-                                        send_email_alert(
-                                            args.smtp_host, args.smtp_port,
-                                            smtp_user=smtp_user, smtp_pass=smtp_pass,
-                                            to_list=to_list, subject=subj, body=body,
-                                        )
+                                    ret_5d = details.get('stk_ret_5d', daily_ctx.get('ret_5d', 0.0))
+                                    sec_key = str(sector).strip() or 'Unknown'
+                                    skip_email = ""
+                                    if args.email_mild_dip_only and not (args.band_min < ret_5d < 0.0):
+                                        skip_email = f"5d {ret_5d:+.1f}% not a mild dip ({args.band_min:g}%..0%)"
+                                    elif emails_today >= args.max_emails_per_day:
+                                        skip_email = f"daily email cap ({args.max_emails_per_day}) reached"
+                                    elif emails_by_sector.get(sec_key, 0) >= args.max_emails_per_sector:
+                                        skip_email = f"sector cap ({args.max_emails_per_sector}) reached for {sec_key}"
+
+                                    if skip_email:
                                         LAST_ALERT_TS[tkr] = now_ts
-                                        alerts_sent += 1
-                                        print(f"  🚨 ALERT [{score}pts]: {tkr} at ${price:.2f}")
-                                    except Exception as ee:
-                                        print(f"  ⚠️  Email send failed for {tkr}: {ee}")
+                                        print(f"  📥 LOGGED [{score}pts]: {tkr} — no email: {skip_email}")
+                                    else:
+                                        regime_tag = f" [{regime.upper()}]" if regime == 'caution' else ""
+                                        subj = f"BUY [{score}pts]{regime_tag}: {tkr} {company_name} — {args.interval}"
+                                        body = _build_alert_body(
+                                            tkr, company_name, sector, score,
+                                            details, args.interval, effective_threshold,
+                                        )
+
+                                        try:
+                                            send_email_alert(
+                                                args.smtp_host, args.smtp_port,
+                                                smtp_user=smtp_user, smtp_pass=smtp_pass,
+                                                to_list=to_list, subject=subj, body=body,
+                                            )
+                                            LAST_ALERT_TS[tkr] = now_ts
+                                            alerts_sent += 1
+                                            emails_today += 1
+                                            emails_by_sector[sec_key] = emails_by_sector.get(sec_key, 0) + 1
+                                            print(f"  🚨 ALERT [{score}pts]: {tkr} at ${price:.2f} "
+                                                  f"(email {emails_today}/{args.max_emails_per_day})")
+                                        except Exception as ee:
+                                            print(f"  ⚠️  Email send failed for {tkr}: {ee}")
 
                                     log_alert_to_csv(
                                         log_path, tkr, score, details,
@@ -1351,6 +1386,14 @@ if __name__ == "__main__":
     parser.add_argument("--skip-caution", action=argparse.BooleanOptionalAction, default=True,
                         help="Suppress all alerts in caution regime (default: on; "
                              "backtest shows caution trades lose money).")
+    parser.add_argument("--email-mild-dip-only", action=argparse.BooleanOptionalAction, default=True,
+                        help="Email only signals whose 5-day move is a mild dip "
+                             "(band-min..0%%), where backtested edge concentrates. "
+                             "Others are still logged to CSV (default: on).")
+    parser.add_argument("--max-emails-per-day", type=int, default=6,
+                        help="Hard cap on alert emails per day (default: 6).")
+    parser.add_argument("--max-emails-per-sector", type=int, default=2,
+                        help="Max alert emails per sector per day (default: 2).")
 
     args = parser.parse_args()
 
