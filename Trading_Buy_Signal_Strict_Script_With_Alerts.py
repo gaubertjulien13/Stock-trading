@@ -920,6 +920,30 @@ def _format_picks_body(picks, alternates, max_picks):
     return "\n".join(lines)
 
 
+def _price_sparkline(tkr, days=20):
+    """Unicode sparkline of the last `days` daily closes, e.g. '▃▄▆█▇▅ 20d -3.2%'.
+    Display-only nice-to-have: returns '' on any problem so alerts never break."""
+    try:
+        df = DAILY_DATA.get(tkr)
+        if df is None or df.empty:
+            return ""
+        close_col, _, _, _ = _extract_cols(df, ticker=tkr)
+        closes = close_col.dropna().tail(days)
+        if len(closes) < 5:
+            return ""
+        vals = closes.to_numpy(dtype=float)
+        lo, hi = vals.min(), vals.max()
+        blocks = "▁▂▃▄▅▆▇█"
+        if hi - lo < 1e-9:
+            spark = blocks[3] * len(vals)
+        else:
+            spark = "".join(blocks[int((v - lo) / (hi - lo) * 7)] for v in vals)
+        pct = (vals[-1] / vals[0] - 1) * 100.0
+        return f"{spark}  {len(vals)}d {pct:+.1f}%"
+    except Exception:
+        return ""
+
+
 # =========================
 # Build alert email body
 # =========================
@@ -1015,6 +1039,7 @@ def _build_alert_body(tkr, company_name, sector, score, details, interval, thres
         Market:       {regime_str}
 
         === Price & Momentum ===
+        Trend (4 weeks):  {_price_sparkline(tkr) or 'n/a'}
         Price:            ${_safe(price)}
         RSI (Wilder 14):  {_safe(details.get('rsi'), '.1f')}
         EMA 5/20 spread:  {ema_spread:.2f}%
