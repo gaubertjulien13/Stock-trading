@@ -1128,6 +1128,13 @@ def run_cli(args):
     picks_time = _parse_hhmm(args.picks_time)
     picks_sent_day = None
 
+    # Baseline handling: the first scan after startup, and the first scan of
+    # each new trading day, re-baseline the score memory. Signals already
+    # above threshold get logged (so the picks email sees them) but don't
+    # send individual emails or consume the email budget.
+    baseline_scan = True
+    scan_day = None
+
     if args.universe.lower() == "nasdaq":
         tickers = get_nasdaq_composite_tickers()
     else:
@@ -1184,6 +1191,16 @@ def run_cli(args):
                         time.sleep(max(15, int(args.poll_secs)))
                         continue
                     print(f"  🟡 CAUTION — threshold raised to {effective_threshold} (from {SCORE_THRESHOLD})")
+
+                # New trading day: clear score memory so the morning scan
+                # re-logs every live signal (feeds the picks email even for
+                # setups that stayed above threshold overnight).
+                today_pt = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+                if scan_day != today_pt:
+                    scan_day = today_pt
+                    LAST_SCORE.clear()
+                    LAST_ALERT_TS.clear()
+                    baseline_scan = True
 
                 # Daily-picks flow: before picks_time, individual alert emails
                 # are held (signals still scanned + logged). At picks_time, one
@@ -1327,7 +1344,9 @@ def run_cli(args):
                                     ret_5d = details.get('stk_ret_5d', daily_ctx.get('ret_5d', 0.0))
                                     sec_key = str(sector).strip() or 'Unknown'
                                     skip_email = ""
-                                    if quiet_period:
+                                    if baseline_scan:
+                                        skip_email = "baseline scan (pre-existing signal, logged only)"
+                                    elif quiet_period:
                                         skip_email = f"quiet period until picks email at {args.picks_time}"
                                     elif args.email_mild_dip_only and not (args.band_min < ret_5d < 0.0):
                                         skip_email = f"5d {ret_5d:+.1f}% not a mild dip ({args.band_min:g}%..0%)"
@@ -1405,6 +1424,11 @@ def run_cli(args):
                             f"  R:R={det.get('rr_ratio', 0):4.1f}"
                             f"  [{', '.join(flags)}]"
                         )
+
+                if baseline_scan:
+                    print("  📌 Baseline scan complete — pre-existing signals logged; "
+                          "individual emails start with fresh crossings")
+                    baseline_scan = False
 
                 print(
                     f"\n  ✅ Scan done [{regime.upper()}]. {alerts_sent} alerts sent,"
