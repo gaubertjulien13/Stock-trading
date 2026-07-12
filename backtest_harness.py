@@ -1001,6 +1001,79 @@ CANDIDATE_WEIGHTS = {
 }
 
 
+def entry_timing_test(entries, arrays, hold_bars, slippage_bps, stop_mult, target_mult,
+                      regime_filtered, wait_bars):
+    """Chase-at-alert vs retrace-limit entries on identical signals.
+    Limit fills pay no entry slippage (passive side); unfilled signals are skipped."""
+    slip = slippage_bps / 1e4
+    variants = [('CHASE next-bar open (baseline)', None)]
+    variants += [(f'LIMIT {k:.2f}xATR below, wait {wait_bars}b', k) for k in (0.15, 0.25, 0.40)]
+
+    print(f"\n{'=' * 96}")
+    print(f"  ENTRY TIMING TEST  |  exit {stop_mult}/{target_mult}xATR  |  "
+          f"{'regime-filtered' if regime_filtered else 'all'}  |  {len(entries)} signals")
+    print(f"  {'variant':34s} {'fill%':>6} {'n':>5} {'exp/fill':>9} {'exp/signal':>10} "
+          f"{'TEST exp':>9} {'win%':>6} {'PF':>6}")
+    print(f"{'=' * 96}")
+
+    for name, k in variants:
+        rs, test_rs, wins, gains, losses = [], [], 0, 0.0, 0.0
+        n_signals = n_filled = 0
+        for e in entries:
+            if regime_filtered and not e['regime_ok']:
+                continue
+            a = arrays.get(e['ticker'])
+            if a is None or e['daily_atr'] <= 0:
+                continue
+            n_signals += 1
+            H, L, C, O = a['high'], a['low'], a['close'], a['open']
+            atr = e['daily_atr']
+            if k is None:
+                fill_idx, fill_px, entry_slip = e['entry_idx'], e['entry_price'], slip
+            else:
+                limit = e['entry_price'] - k * atr
+                fill_idx = fill_px = None
+                for off in range(0, wait_bars + 1):
+                    i = e['entry_idx'] + off
+                    if i >= len(C):
+                        break
+                    if O[i] <= limit:
+                        fill_idx, fill_px = i, O[i]
+                        break
+                    if L[i] <= limit:
+                        fill_idx, fill_px = i, limit
+                        break
+                if fill_idx is None:
+                    continue
+                entry_slip = 0.0
+            n_filled += 1
+            result, exit_px, _, risk = resolve_fixed(
+                H, L, C, fill_idx, fill_px, atr, hold_bars, stop_mult, target_mult)
+            if risk <= 0:
+                continue
+            r = (exit_px - fill_px) / risk - (entry_slip * fill_px + slip * exit_px) / risk
+            rs.append(r)
+            if e['split'] == 'test':
+                test_rs.append(r)
+            if r > 0:
+                wins += 1
+                gains += r
+            else:
+                losses += -r
+        if not rs:
+            print(f"  {name:34s}   no fills")
+            continue
+        te = f"{np.mean(test_rs):+.3f}" if test_rs else "  n/a"
+        pf = gains / losses if losses > 0 else float('inf')
+        exp_fill = np.mean(rs)
+        exp_signal = np.sum(rs) / max(n_signals, 1)  # unfilled = 0R opportunity
+        print(f"  {name:34s} {n_filled / max(n_signals, 1) * 100:5.1f}% {len(rs):5d} "
+              f"{exp_fill:>+9.3f} {exp_signal:>+10.3f} {te:>9} "
+              f"{wins / len(rs) * 100:5.1f}% {pf:6.2f}")
+    print(f"{'=' * 96}")
+    print("  exp/fill = expectancy per filled trade; exp/signal = per alert incl. unfilled (0R).\n")
+
+
 def sector_regime_analysis(entries, arrays, hold_bars, slippage_bps, stop_mult, target_mult,
                            regime_filtered):
     """Validate: (a) sector-ETF momentum veto, (b) per-day sector caps,
@@ -1335,9 +1408,18 @@ def main():
                         help="Test taking only the top-N highest-scoring signals per day")
     parser.add_argument("--sector-analysis", action="store_true",
                         help="Validate sector-ETF veto, sector caps, and regime-dependent exits")
+    parser.add_argument("--entry-timing", action="store_true",
+                        help="Compare chase-at-alert vs retrace-limit entries")
+    parser.add_argument("--recent-only", action="store_true",
+                        help="Use one recent ~55d window regardless of interval "
+                             "(for fair 1h vs 15m comparisons)")
     args = parser.parse_args()
 
-    windows = WINDOWS_1H if args.interval in ('1h', '60m') else _recent_15m_windows()
+    if args.recent_only:
+        w = _recent_15m_windows()[0]
+        windows = [dict(w, name=f"recent-{args.interval}")]
+    else:
+        windows = WINDOWS_1H if args.interval in ('1h', '60m') else _recent_15m_windows()
 
     print(f"\n{'=' * 72}")
     print(f"  HARDENED BACKTEST HARNESS")
@@ -1389,7 +1471,11 @@ def main():
         entries.extend(ent)
         print(f"  {w['name']:14s} -> {len(ent):4d} entries")
 
-    if args.sector_analysis:
+    if args.entry_timing:
+        entry_timing_test(entries, arrays, hold_bars, args.slippage_bps,
+                          args.stop_mult, args.target_mult, args.regime_filtered,
+                          wait_bars=bars_per_day)
+    elif args.sector_analysis:
         sector_regime_analysis(entries, arrays, hold_bars, args.slippage_bps,
                                args.stop_mult, args.target_mult, args.regime_filtered)
     elif args.topn_test:
