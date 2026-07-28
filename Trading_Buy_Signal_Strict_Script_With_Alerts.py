@@ -1074,6 +1074,13 @@ def _build_alert_body(tkr, company_name, sector, score, details, interval, thres
 def run_cli(args):
     global MIN_AVG_VOLUME_20, MIN_LAST_CLOSE, lookback_days, BATCH_SIZE, SCORE_THRESHOLD
 
+    # Guard against silent hangs: without a default timeout, one dead
+    # connection (yfinance or SMTP) can block a read forever — this froze the
+    # scanner for 4 days in July 2026. With it, dead sockets raise and the
+    # scan loop's exception handling recovers on the next cycle.
+    import socket
+    socket.setdefaulttimeout(30)
+
     MIN_AVG_VOLUME_20 = args.min_volume
     MIN_LAST_CLOSE = args.min_price
     lookback_days = args.lookback
@@ -1112,6 +1119,8 @@ def run_cli(args):
     if args.daily_picks:
         print(f"📋 Daily picks: quiet until {args.picks_time} PT, then top-{args.picks_count} "
               f"picks email; individual alerts resume after")
+    print(f"💓 Heartbeat email: {'ON (one per trading day, any regime)' if args.status_email else 'OFF'}"
+          f"  |  Network timeout: 30s (anti-hang)")
 
     LAST_SCORE = {}
     LAST_ALERT_TS = {}
@@ -1127,6 +1136,7 @@ def run_cli(args):
     # Daily picks: quiet period until picks_time, then one ranked summary email.
     picks_time = _parse_hhmm(args.picks_time)
     picks_sent_day = None
+    status_sent_day = None  # daily heartbeat email
 
     # Baseline handling: the first scan after startup, and the first scan of
     # each new trading day, re-baseline the score memory. Signals already
@@ -1176,6 +1186,38 @@ def run_cli(args):
                 # Step 2b: check market regime kill switch
                 regime = MARKET_REGIME['regime'] if MARKET_REGIME else 'risk_on'
                 effective_threshold = SCORE_THRESHOLD + (MARKET_REGIME['threshold_adjust'] if MARKET_REGIME else 0)
+
+                # Daily heartbeat email — sent on every trading day BEFORE any
+                # regime suppression, so inbox silence always means the script
+                # is down rather than "market unhealthy, sitting out".
+                heartbeat_day = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+                if args.status_email and status_sent_day != heartbeat_day:
+                    r = MARKET_REGIME or {}
+                    if regime == 'risk_on':
+                        status_line = f"Scanning normally. Daily picks email at {args.picks_time} PT."
+                    else:
+                        status_line = f"Alerts SUPPRESSED today ({regime} kill switch)."
+                    body = (
+                        f"Scanner heartbeat — {heartbeat_day}\n\n"
+                        f"Market regime: {regime.upper()}\n"
+                        f"SPY 5d: {r.get('spy_5d_return', 0.0):+.1f}%  |  "
+                        f"breadth: {r.get('breadth_pct', 0.0):.0f}%  |  "
+                        f"SMA50: {'above' if r.get('spy_above_sma50') else 'below'}  |  "
+                        f"SMA200: {'above' if r.get('spy_above_sma200') else 'below'}\n\n"
+                        f"{status_line}\n\n"
+                        f"If you don't get this email on a trading day, the script is down."
+                    )
+                    try:
+                        send_email_alert(
+                            args.smtp_host, args.smtp_port,
+                            smtp_user=smtp_user, smtp_pass=smtp_pass, to_list=to_list,
+                            subject=f"Scanner status {heartbeat_day}: {regime.upper()}",
+                            body=body,
+                        )
+                        status_sent_day = heartbeat_day
+                        print(f"  💓 Heartbeat email sent ({regime.upper()})")
+                    except Exception as ee:
+                        print(f"  ⚠️  Heartbeat email failed: {ee}")
 
                 if regime == 'risk_off':
                     print("  🔴 RISK OFF — alerts suppressed (SPY below SMA200 or sharp drawdown)")
@@ -1531,6 +1573,9 @@ if __name__ == "__main__":
                         help="Local (Pacific) HH:MM to send the daily picks email (default: 07:30).")
     parser.add_argument("--picks-count", type=int, default=3,
                         help="Number of picks in the daily picks email (default: 3).")
+    parser.add_argument("--status-email", action=argparse.BooleanOptionalAction, default=True,
+                        help="Send one heartbeat email per trading day with the market "
+                             "regime, even when alerts are suppressed (default: on).")
 
     args = parser.parse_args()
 
