@@ -1,0 +1,2271 @@
+{
+ "equity": [
+  {
+   "date": "2008-01",
+   "Momentum (validated)": 0.92,
+   "Intel-style turnaround": 1.0,
+   "Laggard + confirmation": 0.868,
+   "SPY buy & hold": 0.94
+  },
+  {
+   "date": "2008-02",
+   "Momentum (validated)": 0.898,
+   "Intel-style turnaround": 1.0,
+   "Laggard + confirmation": 0.85,
+   "SPY buy & hold": 0.915
+  },
+  {
+   "date": "2008-03",
+   "Momentum (validated)": 0.894,
+   "Intel-style turnaround": 1.0,
+   "Laggard + confirmation": 0.623,
+   "SPY buy & hold": 0.907
+  },
+  {
+   "date": "2008-04",
+   "Momentum (validated)": 0.963,
+   "Intel-style turnaround": 0.999,
+   "Laggard + confirmation": 0.649,
+   "SPY buy & hold": 0.95
+  },
+  {
+   "date": "2008-05",
+   "Momentum (validated)": 0.992,
+   "Intel-style turnaround": 0.965,
+   "Laggard + confirmation": 0.627,
+   "SPY buy & hold": 0.965
+  },
+  {
+   "date": "2008-06",
+   "Momentum (validated)": 0.965,
+   "Intel-style turnaround": 0.858,
+   "Laggard + confirmation": 0.557,
+   "SPY buy & hold": 0.884
+  },
+  {
+   "date": "2008-07",
+   "Momentum (validated)": 0.883,
+   "Intel-style turnaround": 0.955,
+   "Laggard + confirmation": 0.62,
+   "SPY buy & hold": 0.876
+  },
+  {
+   "date": "2008-08",
+   "Momentum (validated)": 0.882,
+   "Intel-style turnaround": 0.919,
+   "Laggard + confirmation": 0.625,
+   "SPY buy & hold": 0.89
+  },
+  {
+   "date": "2008-09",
+   "Momentum (validated)": 0.803,
+   "Intel-style turnaround": 0.754,
+   "Laggard + confirmation": 0.56,
+   "SPY buy & hold": 0.806
+  },
+  {
+   "date": "2008-10",
+   "Momentum (validated)": 0.675,
+   "Intel-style turnaround": 0.595,
+   "Laggard + confirmation": 0.438,
+   "SPY buy & hold": 0.673
+  },
+  {
+   "date": "2008-11",
+   "Momentum (validated)": 0.61,
+   "Intel-style turnaround": 0.558,
+   "Laggard + confirmation": 0.382,
+   "SPY buy & hold": 0.626
+  },
+  {
+   "date": "2008-12",
+   "Momentum (validated)": 0.635,
+   "Intel-style turnaround": 0.553,
+   "Laggard + confirmation": 0.441,
+   "SPY buy & hold": 0.632
+  },
+  {
+   "date": "2009-01",
+   "Momentum (validated)": 0.6,
+   "Intel-style turnaround": 0.352,
+   "Laggard + confirmation": 0.506,
+   "SPY buy & hold": 0.58
+  },
+  {
+   "date": "2009-02",
+   "Momentum (validated)": 0.541,
+   "Intel-style turnaround": 0.312,
+   "Laggard + confirmation": 0.555,
+   "SPY buy & hold": 0.518
+  },
+  {
+   "date": "2009-03",
+   "Momentum (validated)": 0.578,
+   "Intel-style turnaround": 0.385,
+   "Laggard + confirmation": 0.51,
+   "SPY buy & hold": 0.561
+  },
+  {
+   "date": "2009-04",
+   "Momentum (validated)": 0.582,
+   "Intel-style turnaround": 0.484,
+   "Laggard + confirmation": 0.51,
+   "SPY buy & hold": 0.617
+  },
+  {
+   "date": "2009-05",
+   "Momentum (validated)": 0.571,
+   "Intel-style turnaround": 0.496,
+   "Laggard + confirmation": 0.51,
+   "SPY buy & hold": 0.653
+  },
+  {
+   "date": "2009-06",
+   "Momentum (validated)": 0.582,
+   "Intel-style turnaround": 0.495,
+   "Laggard + confirmation": 0.51,
+   "SPY buy & hold": 0.652
+  },
+  {
+   "date": "2009-07",
+   "Momentum (validated)": 0.626,
+   "Intel-style turnaround": 0.572,
+   "Laggard + confirmation": 0.51,
+   "SPY buy & hold": 0.701
+  },
+  {
+   "date": "2009-08",
+   "Momentum (validated)": 0.631,
+   "Intel-style turnaround": 0.615,
+   "Laggard + confirmation": 0.586,
+   "SPY buy & hold": 0.727
+  },
+  {
+   "date": "2009-09",
+   "Momentum (validated)": 0.643,
+   "Intel-style turnaround": 0.635,
+   "Laggard + confirmation": 0.659,
+   "SPY buy & hold": 0.753
+  },
+  {
+   "date": "2009-10",
+   "Momentum (validated)": 0.625,
+   "Intel-style turnaround": 0.597,
+   "Laggard + confirmation": 0.628,
+   "SPY buy & hold": 0.738
+  },
+  {
+   "date": "2009-11",
+   "Momentum (validated)": 0.687,
+   "Intel-style turnaround": 0.56,
+   "Laggard + confirmation": 0.651,
+   "SPY buy & hold": 0.784
+  },
+  {
+   "date": "2009-12",
+   "Momentum (validated)": 0.725,
+   "Intel-style turnaround": 0.574,
+   "Laggard + confirmation": 0.697,
+   "SPY buy & hold": 0.799
+  },
+  {
+   "date": "2010-01",
+   "Momentum (validated)": 0.688,
+   "Intel-style turnaround": 0.5,
+   "Laggard + confirmation": 0.646,
+   "SPY buy & hold": 0.77
+  },
+  {
+   "date": "2010-02",
+   "Momentum (validated)": 0.708,
+   "Intel-style turnaround": 0.52,
+   "Laggard + confirmation": 0.682,
+   "SPY buy & hold": 0.794
+  },
+  {
+   "date": "2010-03",
+   "Momentum (validated)": 0.759,
+   "Intel-style turnaround": 0.521,
+   "Laggard + confirmation": 0.763,
+   "SPY buy & hold": 0.842
+  },
+  {
+   "date": "2010-04",
+   "Momentum (validated)": 0.793,
+   "Intel-style turnaround": 0.541,
+   "Laggard + confirmation": 0.772,
+   "SPY buy & hold": 0.855
+  },
+  {
+   "date": "2010-05",
+   "Momentum (validated)": 0.778,
+   "Intel-style turnaround": 0.461,
+   "Laggard + confirmation": 0.709,
+   "SPY buy & hold": 0.787
+  },
+  {
+   "date": "2010-06",
+   "Momentum (validated)": 0.713,
+   "Intel-style turnaround": 0.402,
+   "Laggard + confirmation": 0.646,
+   "SPY buy & hold": 0.746
+  },
+  {
+   "date": "2010-07",
+   "Momentum (validated)": 0.796,
+   "Intel-style turnaround": 0.445,
+   "Laggard + confirmation": 0.709,
+   "SPY buy & hold": 0.797
+  },
+  {
+   "date": "2010-08",
+   "Momentum (validated)": 0.776,
+   "Intel-style turnaround": 0.425,
+   "Laggard + confirmation": 0.654,
+   "SPY buy & hold": 0.761
+  },
+  {
+   "date": "2010-09",
+   "Momentum (validated)": 0.873,
+   "Intel-style turnaround": 0.452,
+   "Laggard + confirmation": 0.727,
+   "SPY buy & hold": 0.83
+  },
+  {
+   "date": "2010-10",
+   "Momentum (validated)": 0.913,
+   "Intel-style turnaround": 0.461,
+   "Laggard + confirmation": 0.727,
+   "SPY buy & hold": 0.861
+  },
+  {
+   "date": "2010-11",
+   "Momentum (validated)": 0.936,
+   "Intel-style turnaround": 0.457,
+   "Laggard + confirmation": 0.727,
+   "SPY buy & hold": 0.861
+  },
+  {
+   "date": "2010-12",
+   "Momentum (validated)": 0.987,
+   "Intel-style turnaround": 0.503,
+   "Laggard + confirmation": 0.823,
+   "SPY buy & hold": 0.919
+  },
+  {
+   "date": "2011-01",
+   "Momentum (validated)": 1.021,
+   "Intel-style turnaround": 0.517,
+   "Laggard + confirmation": 0.836,
+   "SPY buy & hold": 0.94
+  },
+  {
+   "date": "2011-02",
+   "Momentum (validated)": 1.062,
+   "Intel-style turnaround": 0.532,
+   "Laggard + confirmation": 0.875,
+   "SPY buy & hold": 0.973
+  },
+  {
+   "date": "2011-03",
+   "Momentum (validated)": 1.079,
+   "Intel-style turnaround": 0.534,
+   "Laggard + confirmation": 0.888,
+   "SPY buy & hold": 0.973
+  },
+  {
+   "date": "2011-04",
+   "Momentum (validated)": 1.139,
+   "Intel-style turnaround": 0.527,
+   "Laggard + confirmation": 0.885,
+   "SPY buy & hold": 1.001
+  },
+  {
+   "date": "2011-05",
+   "Momentum (validated)": 1.133,
+   "Intel-style turnaround": 0.528,
+   "Laggard + confirmation": 0.851,
+   "SPY buy & hold": 0.99
+  },
+  {
+   "date": "2011-06",
+   "Momentum (validated)": 1.099,
+   "Intel-style turnaround": 0.454,
+   "Laggard + confirmation": 0.825,
+   "SPY buy & hold": 0.973
+  },
+  {
+   "date": "2011-07",
+   "Momentum (validated)": 1.068,
+   "Intel-style turnaround": 0.405,
+   "Laggard + confirmation": 0.799,
+   "SPY buy & hold": 0.954
+  },
+  {
+   "date": "2011-08",
+   "Momentum (validated)": 1.008,
+   "Intel-style turnaround": 0.283,
+   "Laggard + confirmation": 0.706,
+   "SPY buy & hold": 0.901
+  },
+  {
+   "date": "2011-09",
+   "Momentum (validated)": 0.894,
+   "Intel-style turnaround": 0.233,
+   "Laggard + confirmation": 0.587,
+   "SPY buy & hold": 0.839
+  },
+  {
+   "date": "2011-10",
+   "Momentum (validated)": 1.046,
+   "Intel-style turnaround": 0.319,
+   "Laggard + confirmation": 0.696,
+   "SPY buy & hold": 0.93
+  },
+  {
+   "date": "2011-11",
+   "Momentum (validated)": 1.003,
+   "Intel-style turnaround": 0.319,
+   "Laggard + confirmation": 0.689,
+   "SPY buy & hold": 0.927
+  },
+  {
+   "date": "2011-12",
+   "Momentum (validated)": 0.971,
+   "Intel-style turnaround": 0.319,
+   "Laggard + confirmation": 0.669,
+   "SPY buy & hold": 0.936
+  },
+  {
+   "date": "2012-01",
+   "Momentum (validated)": 0.977,
+   "Intel-style turnaround": 0.319,
+   "Laggard + confirmation": 0.655,
+   "SPY buy & hold": 0.98
+  },
+  {
+   "date": "2012-02",
+   "Momentum (validated)": 1.011,
+   "Intel-style turnaround": 0.343,
+   "Laggard + confirmation": 0.705,
+   "SPY buy & hold": 1.022
+  },
+  {
+   "date": "2012-03",
+   "Momentum (validated)": 1.047,
+   "Intel-style turnaround": 0.354,
+   "Laggard + confirmation": 0.713,
+   "SPY buy & hold": 1.055
+  },
+  {
+   "date": "2012-04",
+   "Momentum (validated)": 1.044,
+   "Intel-style turnaround": 0.341,
+   "Laggard + confirmation": 0.671,
+   "SPY buy & hold": 1.048
+  },
+  {
+   "date": "2012-05",
+   "Momentum (validated)": 1.016,
+   "Intel-style turnaround": 0.314,
+   "Laggard + confirmation": 0.603,
+   "SPY buy & hold": 0.985
+  },
+  {
+   "date": "2012-06",
+   "Momentum (validated)": 1.044,
+   "Intel-style turnaround": 0.316,
+   "Laggard + confirmation": 0.637,
+   "SPY buy & hold": 1.025
+  },
+  {
+   "date": "2012-07",
+   "Momentum (validated)": 1.051,
+   "Intel-style turnaround": 0.295,
+   "Laggard + confirmation": 0.596,
+   "SPY buy & hold": 1.037
+  },
+  {
+   "date": "2012-08",
+   "Momentum (validated)": 1.054,
+   "Intel-style turnaround": 0.296,
+   "Laggard + confirmation": 0.631,
+   "SPY buy & hold": 1.063
+  },
+  {
+   "date": "2012-09",
+   "Momentum (validated)": 1.089,
+   "Intel-style turnaround": 0.304,
+   "Laggard + confirmation": 0.671,
+   "SPY buy & hold": 1.09
+  },
+  {
+   "date": "2012-10",
+   "Momentum (validated)": 1.067,
+   "Intel-style turnaround": 0.276,
+   "Laggard + confirmation": 0.664,
+   "SPY buy & hold": 1.07
+  },
+  {
+   "date": "2012-11",
+   "Momentum (validated)": 1.085,
+   "Intel-style turnaround": 0.301,
+   "Laggard + confirmation": 0.688,
+   "SPY buy & hold": 1.076
+  },
+  {
+   "date": "2012-12",
+   "Momentum (validated)": 1.081,
+   "Intel-style turnaround": 0.307,
+   "Laggard + confirmation": 0.742,
+   "SPY buy & hold": 1.086
+  },
+  {
+   "date": "2013-01",
+   "Momentum (validated)": 1.135,
+   "Intel-style turnaround": 0.333,
+   "Laggard + confirmation": 0.794,
+   "SPY buy & hold": 1.142
+  },
+  {
+   "date": "2013-02",
+   "Momentum (validated)": 1.142,
+   "Intel-style turnaround": 0.337,
+   "Laggard + confirmation": 0.804,
+   "SPY buy & hold": 1.156
+  },
+  {
+   "date": "2013-03",
+   "Momentum (validated)": 1.202,
+   "Intel-style turnaround": 0.367,
+   "Laggard + confirmation": 0.834,
+   "SPY buy & hold": 1.2
+  },
+  {
+   "date": "2013-04",
+   "Momentum (validated)": 1.229,
+   "Intel-style turnaround": 0.352,
+   "Laggard + confirmation": 0.867,
+   "SPY buy & hold": 1.223
+  },
+  {
+   "date": "2013-05",
+   "Momentum (validated)": 1.273,
+   "Intel-style turnaround": 0.404,
+   "Laggard + confirmation": 0.95,
+   "SPY buy & hold": 1.252
+  },
+  {
+   "date": "2013-06",
+   "Momentum (validated)": 1.226,
+   "Intel-style turnaround": 0.399,
+   "Laggard + confirmation": 0.911,
+   "SPY buy & hold": 1.235
+  },
+  {
+   "date": "2013-07",
+   "Momentum (validated)": 1.309,
+   "Intel-style turnaround": 0.425,
+   "Laggard + confirmation": 0.989,
+   "SPY buy & hold": 1.299
+  },
+  {
+   "date": "2013-08",
+   "Momentum (validated)": 1.251,
+   "Intel-style turnaround": 0.434,
+   "Laggard + confirmation": 0.952,
+   "SPY buy & hold": 1.26
+  },
+  {
+   "date": "2013-09",
+   "Momentum (validated)": 1.297,
+   "Intel-style turnaround": 0.475,
+   "Laggard + confirmation": 0.99,
+   "SPY buy & hold": 1.3
+  },
+  {
+   "date": "2013-10",
+   "Momentum (validated)": 1.354,
+   "Intel-style turnaround": 0.533,
+   "Laggard + confirmation": 1.079,
+   "SPY buy & hold": 1.36
+  },
+  {
+   "date": "2013-11",
+   "Momentum (validated)": 1.434,
+   "Intel-style turnaround": 0.503,
+   "Laggard + confirmation": 1.099,
+   "SPY buy & hold": 1.401
+  },
+  {
+   "date": "2013-12",
+   "Momentum (validated)": 1.454,
+   "Intel-style turnaround": 0.548,
+   "Laggard + confirmation": 1.144,
+   "SPY buy & hold": 1.437
+  },
+  {
+   "date": "2014-01",
+   "Momentum (validated)": 1.399,
+   "Intel-style turnaround": 0.474,
+   "Laggard + confirmation": 1.065,
+   "SPY buy & hold": 1.386
+  },
+  {
+   "date": "2014-02",
+   "Momentum (validated)": 1.448,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.155,
+   "SPY buy & hold": 1.449
+  },
+  {
+   "date": "2014-03",
+   "Momentum (validated)": 1.462,
+   "Intel-style turnaround": 0.495,
+   "Laggard + confirmation": 1.296,
+   "SPY buy & hold": 1.461
+  },
+  {
+   "date": "2014-04",
+   "Momentum (validated)": 1.415,
+   "Intel-style turnaround": 0.495,
+   "Laggard + confirmation": 1.278,
+   "SPY buy & hold": 1.471
+  },
+  {
+   "date": "2014-05",
+   "Momentum (validated)": 1.475,
+   "Intel-style turnaround": 0.495,
+   "Laggard + confirmation": 1.255,
+   "SPY buy & hold": 1.506
+  },
+  {
+   "date": "2014-06",
+   "Momentum (validated)": 1.5,
+   "Intel-style turnaround": 0.492,
+   "Laggard + confirmation": 1.42,
+   "SPY buy & hold": 1.537
+  },
+  {
+   "date": "2014-07",
+   "Momentum (validated)": 1.486,
+   "Intel-style turnaround": 0.459,
+   "Laggard + confirmation": 1.223,
+   "SPY buy & hold": 1.516
+  },
+  {
+   "date": "2014-08",
+   "Momentum (validated)": 1.543,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.352,
+   "SPY buy & hold": 1.576
+  },
+  {
+   "date": "2014-09",
+   "Momentum (validated)": 1.511,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.223,
+   "SPY buy & hold": 1.554
+  },
+  {
+   "date": "2014-10",
+   "Momentum (validated)": 1.546,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.188,
+   "SPY buy & hold": 1.591
+  },
+  {
+   "date": "2014-11",
+   "Momentum (validated)": 1.627,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.162,
+   "SPY buy & hold": 1.634
+  },
+  {
+   "date": "2014-12",
+   "Momentum (validated)": 1.625,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.084,
+   "SPY buy & hold": 1.63
+  },
+  {
+   "date": "2015-01",
+   "Momentum (validated)": 1.595,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.213,
+   "SPY buy & hold": 1.582
+  },
+  {
+   "date": "2015-02",
+   "Momentum (validated)": 1.751,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.273,
+   "SPY buy & hold": 1.671
+  },
+  {
+   "date": "2015-03",
+   "Momentum (validated)": 1.702,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.24,
+   "SPY buy & hold": 1.645
+  },
+  {
+   "date": "2015-04",
+   "Momentum (validated)": 1.694,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.19,
+   "SPY buy & hold": 1.661
+  },
+  {
+   "date": "2015-05",
+   "Momentum (validated)": 1.733,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.078,
+   "SPY buy & hold": 1.682
+  },
+  {
+   "date": "2015-06",
+   "Momentum (validated)": 1.701,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 1.005,
+   "SPY buy & hold": 1.648
+  },
+  {
+   "date": "2015-07",
+   "Momentum (validated)": 1.703,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 0.88,
+   "SPY buy & hold": 1.685
+  },
+  {
+   "date": "2015-08",
+   "Momentum (validated)": 1.648,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 0.784,
+   "SPY buy & hold": 1.583
+  },
+  {
+   "date": "2015-09",
+   "Momentum (validated)": 1.645,
+   "Intel-style turnaround": 0.477,
+   "Laggard + confirmation": 0.768,
+   "SPY buy & hold": 1.542
+  },
+  {
+   "date": "2015-10",
+   "Momentum (validated)": 1.746,
+   "Intel-style turnaround": 0.476,
+   "Laggard + confirmation": 0.93,
+   "SPY buy & hold": 1.673
+  },
+  {
+   "date": "2015-11",
+   "Momentum (validated)": 1.744,
+   "Intel-style turnaround": 0.489,
+   "Laggard + confirmation": 0.854,
+   "SPY buy & hold": 1.679
+  },
+  {
+   "date": "2015-12",
+   "Momentum (validated)": 1.733,
+   "Intel-style turnaround": 0.535,
+   "Laggard + confirmation": 0.933,
+   "SPY buy & hold": 1.65
+  },
+  {
+   "date": "2016-01",
+   "Momentum (validated)": 1.619,
+   "Intel-style turnaround": 0.543,
+   "Laggard + confirmation": 0.948,
+   "SPY buy & hold": 1.568
+  },
+  {
+   "date": "2016-02",
+   "Momentum (validated)": 1.629,
+   "Intel-style turnaround": 0.648,
+   "Laggard + confirmation": 1.132,
+   "SPY buy & hold": 1.567
+  },
+  {
+   "date": "2016-03",
+   "Momentum (validated)": 1.756,
+   "Intel-style turnaround": 0.669,
+   "Laggard + confirmation": 1.17,
+   "SPY buy & hold": 1.672
+  },
+  {
+   "date": "2016-04",
+   "Momentum (validated)": 1.753,
+   "Intel-style turnaround": 0.727,
+   "Laggard + confirmation": 1.082,
+   "SPY buy & hold": 1.679
+  },
+  {
+   "date": "2016-05",
+   "Momentum (validated)": 1.755,
+   "Intel-style turnaround": 0.762,
+   "Laggard + confirmation": 1.123,
+   "SPY buy & hold": 1.707
+  },
+  {
+   "date": "2016-06",
+   "Momentum (validated)": 1.828,
+   "Intel-style turnaround": 0.763,
+   "Laggard + confirmation": 1.119,
+   "SPY buy & hold": 1.713
+  },
+  {
+   "date": "2016-07",
+   "Momentum (validated)": 1.9,
+   "Intel-style turnaround": 0.784,
+   "Laggard + confirmation": 1.18,
+   "SPY buy & hold": 1.776
+  },
+  {
+   "date": "2016-08",
+   "Momentum (validated)": 1.882,
+   "Intel-style turnaround": 0.774,
+   "Laggard + confirmation": 1.195,
+   "SPY buy & hold": 1.778
+  },
+  {
+   "date": "2016-09",
+   "Momentum (validated)": 1.889,
+   "Intel-style turnaround": 0.819,
+   "Laggard + confirmation": 1.245,
+   "SPY buy & hold": 1.778
+  },
+  {
+   "date": "2016-10",
+   "Momentum (validated)": 1.831,
+   "Intel-style turnaround": 0.807,
+   "Laggard + confirmation": 1.19,
+   "SPY buy & hold": 1.747
+  },
+  {
+   "date": "2016-11",
+   "Momentum (validated)": 1.849,
+   "Intel-style turnaround": 0.794,
+   "Laggard + confirmation": 1.345,
+   "SPY buy & hold": 1.812
+  },
+  {
+   "date": "2016-12",
+   "Momentum (validated)": 1.86,
+   "Intel-style turnaround": 0.739,
+   "Laggard + confirmation": 1.32,
+   "SPY buy & hold": 1.848
+  },
+  {
+   "date": "2017-01",
+   "Momentum (validated)": 1.947,
+   "Intel-style turnaround": 0.797,
+   "Laggard + confirmation": 1.405,
+   "SPY buy & hold": 1.881
+  },
+  {
+   "date": "2017-02",
+   "Momentum (validated)": 2.003,
+   "Intel-style turnaround": 0.77,
+   "Laggard + confirmation": 1.35,
+   "SPY buy & hold": 1.955
+  },
+  {
+   "date": "2017-03",
+   "Momentum (validated)": 2.043,
+   "Intel-style turnaround": 0.741,
+   "Laggard + confirmation": 1.366,
+   "SPY buy & hold": 1.958
+  },
+  {
+   "date": "2017-04",
+   "Momentum (validated)": 2.089,
+   "Intel-style turnaround": 0.674,
+   "Laggard + confirmation": 1.294,
+   "SPY buy & hold": 1.977
+  },
+  {
+   "date": "2017-05",
+   "Momentum (validated)": 2.186,
+   "Intel-style turnaround": 0.685,
+   "Laggard + confirmation": 1.229,
+   "SPY buy & hold": 2.005
+  },
+  {
+   "date": "2017-06",
+   "Momentum (validated)": 2.217,
+   "Intel-style turnaround": 0.672,
+   "Laggard + confirmation": 1.231,
+   "SPY buy & hold": 2.018
+  },
+  {
+   "date": "2017-07",
+   "Momentum (validated)": 2.337,
+   "Intel-style turnaround": 0.672,
+   "Laggard + confirmation": 1.311,
+   "SPY buy & hold": 2.059
+  },
+  {
+   "date": "2017-08",
+   "Momentum (validated)": 2.335,
+   "Intel-style turnaround": 0.672,
+   "Laggard + confirmation": 1.226,
+   "SPY buy & hold": 2.065
+  },
+  {
+   "date": "2017-09",
+   "Momentum (validated)": 2.408,
+   "Intel-style turnaround": 0.672,
+   "Laggard + confirmation": 1.298,
+   "SPY buy & hold": 2.107
+  },
+  {
+   "date": "2017-10",
+   "Momentum (validated)": 2.535,
+   "Intel-style turnaround": 0.672,
+   "Laggard + confirmation": 1.267,
+   "SPY buy & hold": 2.157
+  },
+  {
+   "date": "2017-11",
+   "Momentum (validated)": 2.577,
+   "Intel-style turnaround": 0.672,
+   "Laggard + confirmation": 1.279,
+   "SPY buy & hold": 2.223
+  },
+  {
+   "date": "2017-12",
+   "Momentum (validated)": 2.565,
+   "Intel-style turnaround": 0.671,
+   "Laggard + confirmation": 1.403,
+   "SPY buy & hold": 2.25
+  },
+  {
+   "date": "2018-01",
+   "Momentum (validated)": 2.714,
+   "Intel-style turnaround": 0.661,
+   "Laggard + confirmation": 1.448,
+   "SPY buy & hold": 2.376
+  },
+  {
+   "date": "2018-02",
+   "Momentum (validated)": 2.679,
+   "Intel-style turnaround": 0.654,
+   "Laggard + confirmation": 1.388,
+   "SPY buy & hold": 2.29
+  },
+  {
+   "date": "2018-03",
+   "Momentum (validated)": 2.599,
+   "Intel-style turnaround": 0.649,
+   "Laggard + confirmation": 1.34,
+   "SPY buy & hold": 2.227
+  },
+  {
+   "date": "2018-04",
+   "Momentum (validated)": 2.588,
+   "Intel-style turnaround": 0.621,
+   "Laggard + confirmation": 1.369,
+   "SPY buy & hold": 2.239
+  },
+  {
+   "date": "2018-05",
+   "Momentum (validated)": 2.719,
+   "Intel-style turnaround": 0.58,
+   "Laggard + confirmation": 1.492,
+   "SPY buy & hold": 2.293
+  },
+  {
+   "date": "2018-06",
+   "Momentum (validated)": 2.7,
+   "Intel-style turnaround": 0.614,
+   "Laggard + confirmation": 1.559,
+   "SPY buy & hold": 2.306
+  },
+  {
+   "date": "2018-07",
+   "Momentum (validated)": 2.698,
+   "Intel-style turnaround": 0.6,
+   "Laggard + confirmation": 1.52,
+   "SPY buy & hold": 2.392
+  },
+  {
+   "date": "2018-08",
+   "Momentum (validated)": 2.912,
+   "Intel-style turnaround": 0.636,
+   "Laggard + confirmation": 1.547,
+   "SPY buy & hold": 2.468
+  },
+  {
+   "date": "2018-09",
+   "Momentum (validated)": 2.971,
+   "Intel-style turnaround": 0.658,
+   "Laggard + confirmation": 1.548,
+   "SPY buy & hold": 2.483
+  },
+  {
+   "date": "2018-10",
+   "Momentum (validated)": 2.631,
+   "Intel-style turnaround": 0.614,
+   "Laggard + confirmation": 1.537,
+   "SPY buy & hold": 2.311
+  },
+  {
+   "date": "2018-11",
+   "Momentum (validated)": 2.673,
+   "Intel-style turnaround": 0.564,
+   "Laggard + confirmation": 1.595,
+   "SPY buy & hold": 2.354
+  },
+  {
+   "date": "2018-12",
+   "Momentum (validated)": 2.441,
+   "Intel-style turnaround": 0.371,
+   "Laggard + confirmation": 1.321,
+   "SPY buy & hold": 2.147
+  },
+  {
+   "date": "2019-01",
+   "Momentum (validated)": 2.695,
+   "Intel-style turnaround": 0.371,
+   "Laggard + confirmation": 1.423,
+   "SPY buy & hold": 2.319
+  },
+  {
+   "date": "2019-02",
+   "Momentum (validated)": 2.851,
+   "Intel-style turnaround": 0.371,
+   "Laggard + confirmation": 1.469,
+   "SPY buy & hold": 2.394
+  },
+  {
+   "date": "2019-03",
+   "Momentum (validated)": 2.93,
+   "Intel-style turnaround": 0.334,
+   "Laggard + confirmation": 1.5,
+   "SPY buy & hold": 2.437
+  },
+  {
+   "date": "2019-04",
+   "Momentum (validated)": 2.991,
+   "Intel-style turnaround": 0.313,
+   "Laggard + confirmation": 1.382,
+   "SPY buy & hold": 2.537
+  },
+  {
+   "date": "2019-05",
+   "Momentum (validated)": 2.945,
+   "Intel-style turnaround": 0.253,
+   "Laggard + confirmation": 1.346,
+   "SPY buy & hold": 2.375
+  },
+  {
+   "date": "2019-06",
+   "Momentum (validated)": 3.117,
+   "Intel-style turnaround": 0.282,
+   "Laggard + confirmation": 1.461,
+   "SPY buy & hold": 2.54
+  },
+  {
+   "date": "2019-07",
+   "Momentum (validated)": 3.159,
+   "Intel-style turnaround": 0.3,
+   "Laggard + confirmation": 1.36,
+   "SPY buy & hold": 2.579
+  },
+  {
+   "date": "2019-08",
+   "Momentum (validated)": 3.148,
+   "Intel-style turnaround": 0.245,
+   "Laggard + confirmation": 1.252,
+   "SPY buy & hold": 2.535
+  },
+  {
+   "date": "2019-09",
+   "Momentum (validated)": 3.12,
+   "Intel-style turnaround": 0.262,
+   "Laggard + confirmation": 1.364,
+   "SPY buy & hold": 2.585
+  },
+  {
+   "date": "2019-10",
+   "Momentum (validated)": 3.163,
+   "Intel-style turnaround": 0.286,
+   "Laggard + confirmation": 1.382,
+   "SPY buy & hold": 2.642
+  },
+  {
+   "date": "2019-11",
+   "Momentum (validated)": 3.273,
+   "Intel-style turnaround": 0.293,
+   "Laggard + confirmation": 1.431,
+   "SPY buy & hold": 2.738
+  },
+  {
+   "date": "2019-12",
+   "Momentum (validated)": 3.37,
+   "Intel-style turnaround": 0.304,
+   "Laggard + confirmation": 1.495,
+   "SPY buy & hold": 2.817
+  },
+  {
+   "date": "2020-01",
+   "Momentum (validated)": 3.445,
+   "Intel-style turnaround": 0.293,
+   "Laggard + confirmation": 1.44,
+   "SPY buy & hold": 2.816
+  },
+  {
+   "date": "2020-02",
+   "Momentum (validated)": 3.169,
+   "Intel-style turnaround": 0.262,
+   "Laggard + confirmation": 1.278,
+   "SPY buy & hold": 2.593
+  },
+  {
+   "date": "2020-03",
+   "Momentum (validated)": 3.254,
+   "Intel-style turnaround": 0.175,
+   "Laggard + confirmation": 0.831,
+   "SPY buy & hold": 2.269
+  },
+  {
+   "date": "2020-04",
+   "Momentum (validated)": 3.661,
+   "Intel-style turnaround": 0.211,
+   "Laggard + confirmation": 1.041,
+   "SPY buy & hold": 2.557
+  },
+  {
+   "date": "2020-05",
+   "Momentum (validated)": 3.909,
+   "Intel-style turnaround": 0.229,
+   "Laggard + confirmation": 1.026,
+   "SPY buy & hold": 2.679
+  },
+  {
+   "date": "2020-06",
+   "Momentum (validated)": 3.975,
+   "Intel-style turnaround": 0.238,
+   "Laggard + confirmation": 1.084,
+   "SPY buy & hold": 2.727
+  },
+  {
+   "date": "2020-07",
+   "Momentum (validated)": 4.383,
+   "Intel-style turnaround": 0.258,
+   "Laggard + confirmation": 1.175,
+   "SPY buy & hold": 2.887
+  },
+  {
+   "date": "2020-08",
+   "Momentum (validated)": 4.617,
+   "Intel-style turnaround": 0.301,
+   "Laggard + confirmation": 1.305,
+   "SPY buy & hold": 3.089
+  },
+  {
+   "date": "2020-09",
+   "Momentum (validated)": 4.524,
+   "Intel-style turnaround": 0.317,
+   "Laggard + confirmation": 1.321,
+   "SPY buy & hold": 2.973
+  },
+  {
+   "date": "2020-10",
+   "Momentum (validated)": 4.552,
+   "Intel-style turnaround": 0.325,
+   "Laggard + confirmation": 1.366,
+   "SPY buy & hold": 2.899
+  },
+  {
+   "date": "2020-11",
+   "Momentum (validated)": 5.122,
+   "Intel-style turnaround": 0.386,
+   "Laggard + confirmation": 1.709,
+   "SPY buy & hold": 3.214
+  },
+  {
+   "date": "2020-12",
+   "Momentum (validated)": 5.32,
+   "Intel-style turnaround": 0.404,
+   "Laggard + confirmation": 1.817,
+   "SPY buy & hold": 3.334
+  },
+  {
+   "date": "2021-01",
+   "Momentum (validated)": 5.33,
+   "Intel-style turnaround": 0.443,
+   "Laggard + confirmation": 1.83,
+   "SPY buy & hold": 3.3
+  },
+  {
+   "date": "2021-02",
+   "Momentum (validated)": 5.418,
+   "Intel-style turnaround": 0.515,
+   "Laggard + confirmation": 2.182,
+   "SPY buy & hold": 3.391
+  },
+  {
+   "date": "2021-03",
+   "Momentum (validated)": 5.613,
+   "Intel-style turnaround": 0.564,
+   "Laggard + confirmation": 2.312,
+   "SPY buy & hold": 3.545
+  },
+  {
+   "date": "2021-04",
+   "Momentum (validated)": 5.674,
+   "Intel-style turnaround": 0.586,
+   "Laggard + confirmation": 2.388,
+   "SPY buy & hold": 3.733
+  },
+  {
+   "date": "2021-05",
+   "Momentum (validated)": 5.839,
+   "Intel-style turnaround": 0.598,
+   "Laggard + confirmation": 2.557,
+   "SPY buy & hold": 3.757
+  },
+  {
+   "date": "2021-06",
+   "Momentum (validated)": 5.821,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.497,
+   "SPY buy & hold": 3.842
+  },
+  {
+   "date": "2021-07",
+   "Momentum (validated)": 5.958,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.205,
+   "SPY buy & hold": 3.935
+  },
+  {
+   "date": "2021-08",
+   "Momentum (validated)": 6.124,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.192,
+   "SPY buy & hold": 4.053
+  },
+  {
+   "date": "2021-09",
+   "Momentum (validated)": 6.021,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.337,
+   "SPY buy & hold": 3.864
+  },
+  {
+   "date": "2021-10",
+   "Momentum (validated)": 6.425,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.436,
+   "SPY buy & hold": 4.135
+  },
+  {
+   "date": "2021-11",
+   "Momentum (validated)": 6.367,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.206,
+   "SPY buy & hold": 4.102
+  },
+  {
+   "date": "2021-12",
+   "Momentum (validated)": 6.673,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.3,
+   "SPY buy & hold": 4.291
+  },
+  {
+   "date": "2022-01",
+   "Momentum (validated)": 6.405,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.497,
+   "SPY buy & hold": 4.065
+  },
+  {
+   "date": "2022-02",
+   "Momentum (validated)": 6.374,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.36,
+   "SPY buy & hold": 3.945
+  },
+  {
+   "date": "2022-03",
+   "Momentum (validated)": 6.451,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.494,
+   "SPY buy & hold": 4.093
+  },
+  {
+   "date": "2022-04",
+   "Momentum (validated)": 5.806,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.285,
+   "SPY buy & hold": 3.734
+  },
+  {
+   "date": "2022-05",
+   "Momentum (validated)": 5.848,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.434,
+   "SPY buy & hold": 3.742
+  },
+  {
+   "date": "2022-06",
+   "Momentum (validated)": 5.336,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.068,
+   "SPY buy & hold": 3.434
+  },
+  {
+   "date": "2022-07",
+   "Momentum (validated)": 5.592,
+   "Intel-style turnaround": 0.602,
+   "Laggard + confirmation": 2.034,
+   "SPY buy & hold": 3.75
+  },
+  {
+   "date": "2022-08",
+   "Momentum (validated)": 5.578,
+   "Intel-style turnaround": 0.601,
+   "Laggard + confirmation": 1.581,
+   "SPY buy & hold": 3.597
+  },
+  {
+   "date": "2022-09",
+   "Momentum (validated)": 5.21,
+   "Intel-style turnaround": 0.511,
+   "Laggard + confirmation": 1.581,
+   "SPY buy & hold": 3.264
+  },
+  {
+   "date": "2022-10",
+   "Momentum (validated)": 5.86,
+   "Intel-style turnaround": 0.493,
+   "Laggard + confirmation": 1.581,
+   "SPY buy & hold": 3.53
+  },
+  {
+   "date": "2022-11",
+   "Momentum (validated)": 6.07,
+   "Intel-style turnaround": 0.506,
+   "Laggard + confirmation": 1.581,
+   "SPY buy & hold": 3.726
+  },
+  {
+   "date": "2022-12",
+   "Momentum (validated)": 5.754,
+   "Intel-style turnaround": 0.464,
+   "Laggard + confirmation": 1.579,
+   "SPY buy & hold": 3.511
+  },
+  {
+   "date": "2023-01",
+   "Momentum (validated)": 5.768,
+   "Intel-style turnaround": 0.545,
+   "Laggard + confirmation": 1.763,
+   "SPY buy & hold": 3.732
+  },
+  {
+   "date": "2023-02",
+   "Momentum (validated)": 5.574,
+   "Intel-style turnaround": 0.518,
+   "Laggard + confirmation": 1.666,
+   "SPY buy & hold": 3.638
+  },
+  {
+   "date": "2023-03",
+   "Momentum (validated)": 5.439,
+   "Intel-style turnaround": 0.515,
+   "Laggard + confirmation": 1.704,
+   "SPY buy & hold": 3.773
+  },
+  {
+   "date": "2023-04",
+   "Momentum (validated)": 5.484,
+   "Intel-style turnaround": 0.506,
+   "Laggard + confirmation": 1.661,
+   "SPY buy & hold": 3.833
+  },
+  {
+   "date": "2023-05",
+   "Momentum (validated)": 5.165,
+   "Intel-style turnaround": 0.481,
+   "Laggard + confirmation": 1.626,
+   "SPY buy & hold": 3.851
+  },
+  {
+   "date": "2023-06",
+   "Momentum (validated)": 5.28,
+   "Intel-style turnaround": 0.515,
+   "Laggard + confirmation": 1.706,
+   "SPY buy & hold": 4.101
+  },
+  {
+   "date": "2023-07",
+   "Momentum (validated)": 5.344,
+   "Intel-style turnaround": 0.541,
+   "Laggard + confirmation": 1.764,
+   "SPY buy & hold": 4.235
+  },
+  {
+   "date": "2023-08",
+   "Momentum (validated)": 5.418,
+   "Intel-style turnaround": 0.539,
+   "Laggard + confirmation": 1.65,
+   "SPY buy & hold": 4.166
+  },
+  {
+   "date": "2023-09",
+   "Momentum (validated)": 5.191,
+   "Intel-style turnaround": 0.52,
+   "Laggard + confirmation": 1.52,
+   "SPY buy & hold": 3.969
+  },
+  {
+   "date": "2023-10",
+   "Momentum (validated)": 5.118,
+   "Intel-style turnaround": 0.475,
+   "Laggard + confirmation": 1.377,
+   "SPY buy & hold": 3.882
+  },
+  {
+   "date": "2023-11",
+   "Momentum (validated)": 5.545,
+   "Intel-style turnaround": 0.515,
+   "Laggard + confirmation": 1.574,
+   "SPY buy & hold": 4.237
+  },
+  {
+   "date": "2023-12",
+   "Momentum (validated)": 5.838,
+   "Intel-style turnaround": 0.568,
+   "Laggard + confirmation": 1.75,
+   "SPY buy & hold": 4.43
+  },
+  {
+   "date": "2024-01",
+   "Momentum (validated)": 5.895,
+   "Intel-style turnaround": 0.554,
+   "Laggard + confirmation": 1.7,
+   "SPY buy & hold": 4.501
+  },
+  {
+   "date": "2024-02",
+   "Momentum (validated)": 6.227,
+   "Intel-style turnaround": 0.562,
+   "Laggard + confirmation": 1.759,
+   "SPY buy & hold": 4.736
+  },
+  {
+   "date": "2024-03",
+   "Momentum (validated)": 6.353,
+   "Intel-style turnaround": 0.614,
+   "Laggard + confirmation": 1.837,
+   "SPY buy & hold": 4.891
+  },
+  {
+   "date": "2024-04",
+   "Momentum (validated)": 6.021,
+   "Intel-style turnaround": 0.574,
+   "Laggard + confirmation": 1.654,
+   "SPY buy & hold": 4.694
+  },
+  {
+   "date": "2024-05",
+   "Momentum (validated)": 6.244,
+   "Intel-style turnaround": 0.578,
+   "Laggard + confirmation": 1.621,
+   "SPY buy & hold": 4.931
+  },
+  {
+   "date": "2024-06",
+   "Momentum (validated)": 6.562,
+   "Intel-style turnaround": 0.571,
+   "Laggard + confirmation": 1.557,
+   "SPY buy & hold": 5.105
+  },
+  {
+   "date": "2024-07",
+   "Momentum (validated)": 6.616,
+   "Intel-style turnaround": 0.637,
+   "Laggard + confirmation": 1.629,
+   "SPY buy & hold": 5.167
+  },
+  {
+   "date": "2024-08",
+   "Momentum (validated)": 6.939,
+   "Intel-style turnaround": 0.616,
+   "Laggard + confirmation": 1.589,
+   "SPY buy & hold": 5.287
+  },
+  {
+   "date": "2024-09",
+   "Momentum (validated)": 7.123,
+   "Intel-style turnaround": 0.627,
+   "Laggard + confirmation": 1.619,
+   "SPY buy & hold": 5.399
+  },
+  {
+   "date": "2024-10",
+   "Momentum (validated)": 7.194,
+   "Intel-style turnaround": 0.646,
+   "Laggard + confirmation": 1.589,
+   "SPY buy & hold": 5.35
+  },
+  {
+   "date": "2024-11",
+   "Momentum (validated)": 7.851,
+   "Intel-style turnaround": 0.665,
+   "Laggard + confirmation": 1.597,
+   "SPY buy & hold": 5.669
+  },
+  {
+   "date": "2024-12",
+   "Momentum (validated)": 7.625,
+   "Intel-style turnaround": 0.586,
+   "Laggard + confirmation": 1.468,
+   "SPY buy & hold": 5.533
+  },
+  {
+   "date": "2025-01",
+   "Momentum (validated)": 7.973,
+   "Intel-style turnaround": 0.577,
+   "Laggard + confirmation": 1.516,
+   "SPY buy & hold": 5.682
+  },
+  {
+   "date": "2025-02",
+   "Momentum (validated)": 7.554,
+   "Intel-style turnaround": 0.506,
+   "Laggard + confirmation": 1.432,
+   "SPY buy & hold": 5.609
+  },
+  {
+   "date": "2025-03",
+   "Momentum (validated)": 6.938,
+   "Intel-style turnaround": 0.513,
+   "Laggard + confirmation": 1.363,
+   "SPY buy & hold": 5.297
+  },
+  {
+   "date": "2025-04",
+   "Momentum (validated)": 7.018,
+   "Intel-style turnaround": 0.492,
+   "Laggard + confirmation": 1.291,
+   "SPY buy & hold": 5.251
+  },
+  {
+   "date": "2025-05",
+   "Momentum (validated)": 7.819,
+   "Intel-style turnaround": 0.576,
+   "Laggard + confirmation": 1.357,
+   "SPY buy & hold": 5.581
+  },
+  {
+   "date": "2025-06",
+   "Momentum (validated)": 8.466,
+   "Intel-style turnaround": 0.587,
+   "Laggard + confirmation": 1.496,
+   "SPY buy & hold": 5.868
+  },
+  {
+   "date": "2025-07",
+   "Momentum (validated)": 8.787,
+   "Intel-style turnaround": 0.604,
+   "Laggard + confirmation": 1.496,
+   "SPY buy & hold": 6.003
+  },
+  {
+   "date": "2025-08",
+   "Momentum (validated)": 8.701,
+   "Intel-style turnaround": 0.661,
+   "Laggard + confirmation": 1.51,
+   "SPY buy & hold": 6.126
+  },
+  {
+   "date": "2025-09",
+   "Momentum (validated)": 8.91,
+   "Intel-style turnaround": 0.661,
+   "Laggard + confirmation": 1.488,
+   "SPY buy & hold": 6.344
+  },
+  {
+   "date": "2025-10",
+   "Momentum (validated)": 9.096,
+   "Intel-style turnaround": 0.654,
+   "Laggard + confirmation": 1.478,
+   "SPY buy & hold": 6.496
+  },
+  {
+   "date": "2025-11",
+   "Momentum (validated)": 8.964,
+   "Intel-style turnaround": 0.667,
+   "Laggard + confirmation": 1.5,
+   "SPY buy & hold": 6.508
+  },
+  {
+   "date": "2025-12",
+   "Momentum (validated)": 9.025,
+   "Intel-style turnaround": 0.617,
+   "Laggard + confirmation": 1.478,
+   "SPY buy & hold": 6.513
+  },
+  {
+   "date": "2026-01",
+   "Momentum (validated)": 9.007,
+   "Intel-style turnaround": 0.716,
+   "Laggard + confirmation": 1.638,
+   "SPY buy & hold": 6.609
+  },
+  {
+   "date": "2026-02",
+   "Momentum (validated)": 8.98,
+   "Intel-style turnaround": 0.766,
+   "Laggard + confirmation": 1.74,
+   "SPY buy & hold": 6.552
+  },
+  {
+   "date": "2026-03",
+   "Momentum (validated)": 8.815,
+   "Intel-style turnaround": 0.684,
+   "Laggard + confirmation": 1.647,
+   "SPY buy & hold": 6.229
+  },
+  {
+   "date": "2026-04",
+   "Momentum (validated)": 10.091,
+   "Intel-style turnaround": 0.681,
+   "Laggard + confirmation": 1.759,
+   "SPY buy & hold": 6.883
+  },
+  {
+   "date": "2026-05",
+   "Momentum (validated)": 10.419,
+   "Intel-style turnaround": 0.698,
+   "Laggard + confirmation": 1.761,
+   "SPY buy & hold": 7.245
+  },
+  {
+   "date": "2026-06",
+   "Momentum (validated)": 10.857,
+   "Intel-style turnaround": 0.797,
+   "Laggard + confirmation": 1.721,
+   "SPY buy & hold": 7.171
+  },
+  {
+   "date": "2026-07",
+   "Momentum (validated)": 10.435,
+   "Intel-style turnaround": 0.772,
+   "Laggard + confirmation": 1.785,
+   "SPY buy & hold": 7.173
+  }
+ ],
+ "portfolio_stats": [
+  {
+   "strategy": "Momentum (validated)",
+   "CAGR_%": 13.46,
+   "SPY_CAGR_%": 11.19,
+   "excess_%": 2.27,
+   "vol_%": 20.87,
+   "sharpe": 0.71,
+   "maxDD_%": -50.3,
+   "SPY_maxDD_%": -51.87,
+   "final_x": 10.43,
+   "SPY_x": 7.17
+  },
+  {
+   "strategy": "Intel-style turnaround",
+   "CAGR_%": -1.38,
+   "SPY_CAGR_%": 11.19,
+   "excess_%": -12.57,
+   "vol_%": 35.52,
+   "sharpe": 0.14,
+   "maxDD_%": -85.63,
+   "SPY_maxDD_%": -51.87,
+   "final_x": 0.77,
+   "SPY_x": 7.17
+  },
+  {
+   "strategy": "Laggard + confirmation",
+   "CAGR_%": 3.17,
+   "SPY_CAGR_%": 11.19,
+   "excess_%": -8.02,
+   "vol_%": 30.64,
+   "sharpe": 0.26,
+   "maxDD_%": -67.89,
+   "SPY_maxDD_%": -51.87,
+   "final_x": 1.79,
+   "SPY_x": 7.17
+  },
+  {
+   "strategy": "SPY buy & hold",
+   "CAGR_%": 11.19,
+   "SPY_CAGR_%": 11.19,
+   "excess_%": 0.0,
+   "vol_%": 19.79,
+   "sharpe": 0.64,
+   "maxDD_%": -51.87,
+   "SPY_maxDD_%": -51.87,
+   "final_x": 7.17,
+   "SPY_x": 7.17
+  }
+ ],
+ "horse_race": [
+  {
+   "setup": "A. INTEL playbook (damaged + hot industry + reclaim)",
+   "n_signals": 50,
+   "6m_med_ret": null,
+   "6m_med_exSPY": null,
+   "6m_beatSPY%": null,
+   "12m_med_exSPY": null
+  },
+  {
+   "setup": "B. Damaged + WEAK industry + reclaim (cyclical washout)",
+   "n_signals": 80,
+   "6m_med_ret": null,
+   "6m_med_exSPY": null,
+   "6m_beatSPY%": null,
+   "12m_med_exSPY": null
+  },
+  {
+   "setup": "C. Damaged + reclaim (industry agnostic)",
+   "n_signals": 130,
+   "6m_med_ret": 6.14,
+   "6m_med_exSPY": -5.51,
+   "6m_beatSPY%": 40.62,
+   "12m_med_exSPY": -0.62
+  },
+  {
+   "setup": "D. Pure 12m momentum (top 20%) + above 200dma",
+   "n_signals": 71979,
+   "6m_med_ret": 5.34,
+   "6m_med_exSPY": -1.34,
+   "6m_beatSPY%": 46.58,
+   "12m_med_exSPY": -2.64
+  },
+  {
+   "setup": "E. Momentum + rising 200dma + hot industry",
+   "n_signals": 58709,
+   "6m_med_ret": 5.4,
+   "6m_med_exSPY": -0.99,
+   "6m_beatSPY%": 47.4,
+   "12m_med_exSPY": -2.08
+  },
+  {
+   "setup": "F. Near 52w high + hot industry",
+   "n_signals": 118359,
+   "6m_med_ret": 5.3,
+   "6m_med_exSPY": -0.66,
+   "6m_beatSPY%": 47.91,
+   "12m_med_exSPY": -1.44
+  },
+  {
+   "setup": "G. Buy the dip in an uptrend (1m pullback, rising 200dma)",
+   "n_signals": 19431,
+   "6m_med_ret": 6.34,
+   "6m_med_exSPY": -0.83,
+   "6m_beatSPY%": 47.99,
+   "12m_med_exSPY": -2.97
+  },
+  {
+   "setup": "H. Quality trend: above 200dma + rising 200dma",
+   "n_signals": 213899,
+   "6m_med_ret": 5.47,
+   "6m_med_exSPY": -0.84,
+   "6m_beatSPY%": 47.57,
+   "12m_med_exSPY": -2.0
+  },
+  {
+   "setup": "I. Deep value bounce: dd<=-60% + reclaim",
+   "n_signals": 28,
+   "6m_med_ret": null,
+   "6m_med_exSPY": null,
+   "6m_beatSPY%": null,
+   "12m_med_exSPY": null
+  },
+  {
+   "setup": "J. Laggard turning: damaged + hot industry + rel_3m>0",
+   "n_signals": 4390,
+   "6m_med_ret": 3.48,
+   "6m_med_exSPY": -2.3,
+   "6m_beatSPY%": 45.89,
+   "12m_med_exSPY": -7.14
+  },
+  {
+   "setup": "Z. BASELINE: all eligible members",
+   "n_signals": 386067,
+   "6m_med_ret": 5.74,
+   "6m_med_exSPY": -0.95,
+   "6m_beatSPY%": 47.52,
+   "12m_med_exSPY": -2.31
+  }
+ ],
+ "factors": [
+  {
+   "factor": "off_52w_low_pct",
+   "ic": 0.11,
+   "spread": 7.27,
+   "stable": false,
+   "note": "Strongest, but sign flips in 2023-2026"
+  },
+  {
+   "factor": "vol_ann",
+   "ic": 0.06,
+   "spread": 5.5,
+   "stable": false,
+   "note": "Just rewards beta; flips sign recently"
+  },
+  {
+   "factor": "ret_6m",
+   "ic": 0.05,
+   "spread": 3.48,
+   "stable": false,
+   "note": "Noise"
+  },
+  {
+   "factor": "rel_12m (the laggard factor)",
+   "ic": 0.02,
+   "spread": 2.92,
+   "stable": false,
+   "note": "Core of the Intel thesis. No predictive power."
+  },
+  {
+   "factor": "dd_3y (beaten-down-ness)",
+   "ic": 0.01,
+   "spread": 0.62,
+   "stable": false,
+   "note": "Core of the Intel thesis. No predictive power."
+  },
+  {
+   "factor": "sma200_slope",
+   "ic": 0.02,
+   "spread": 1.34,
+   "stable": false,
+   "note": "Noise"
+  }
+ ],
+ "intc": [
+  {
+   "date": "2021-01",
+   "price": 50.18,
+   "dd": -16.9
+  },
+  {
+   "date": "2021-02",
+   "price": 55.28,
+   "dd": -8.5
+  },
+  {
+   "date": "2021-03",
+   "price": 58.21,
+   "dd": -3.6
+  },
+  {
+   "date": "2021-04",
+   "price": 52.32,
+   "dd": -15.7
+  },
+  {
+   "date": "2021-05",
+   "price": 52.27,
+   "dd": -15.8
+  },
+  {
+   "date": "2021-06",
+   "price": 51.37,
+   "dd": -17.2
+  },
+  {
+   "date": "2021-07",
+   "price": 49.16,
+   "dd": -20.8
+  },
+  {
+   "date": "2021-08",
+   "price": 49.79,
+   "dd": -19.8
+  },
+  {
+   "date": "2021-09",
+   "price": 49.07,
+   "dd": -21.0
+  },
+  {
+   "date": "2021-10",
+   "price": 45.13,
+   "dd": -27.3
+  },
+  {
+   "date": "2021-11",
+   "price": 45.63,
+   "dd": -26.5
+  },
+  {
+   "date": "2021-12",
+   "price": 47.76,
+   "dd": -23.1
+  },
+  {
+   "date": "2022-01",
+   "price": 45.28,
+   "dd": -27.1
+  },
+  {
+   "date": "2022-02",
+   "price": 44.58,
+   "dd": -28.2
+  },
+  {
+   "date": "2022-03",
+   "price": 46.32,
+   "dd": -25.4
+  },
+  {
+   "date": "2022-04",
+   "price": 40.74,
+   "dd": -34.4
+  },
+  {
+   "date": "2022-05",
+   "price": 41.84,
+   "dd": -32.6
+  },
+  {
+   "date": "2022-06",
+   "price": 35.24,
+   "dd": -43.2
+  },
+  {
+   "date": "2022-07",
+   "price": 34.2,
+   "dd": -44.9
+  },
+  {
+   "date": "2022-08",
+   "price": 30.37,
+   "dd": -51.1
+  },
+  {
+   "date": "2022-09",
+   "price": 24.52,
+   "dd": -60.5
+  },
+  {
+   "date": "2022-10",
+   "price": 27.05,
+   "dd": -56.4
+  },
+  {
+   "date": "2022-11",
+   "price": 29.0,
+   "dd": -53.3
+  },
+  {
+   "date": "2022-12",
+   "price": 25.49,
+   "dd": -58.9
+  },
+  {
+   "date": "2023-01",
+   "price": 27.25,
+   "dd": -56.1
+  },
+  {
+   "date": "2023-02",
+   "price": 24.33,
+   "dd": -60.8
+  },
+  {
+   "date": "2023-03",
+   "price": 31.89,
+   "dd": -48.6
+  },
+  {
+   "date": "2023-04",
+   "price": 30.32,
+   "dd": -51.2
+  },
+  {
+   "date": "2023-05",
+   "price": 30.81,
+   "dd": -50.4
+  },
+  {
+   "date": "2023-06",
+   "price": 32.77,
+   "dd": -47.2
+  },
+  {
+   "date": "2023-07",
+   "price": 35.06,
+   "dd": -43.5
+  },
+  {
+   "date": "2023-08",
+   "price": 34.56,
+   "dd": -44.3
+  },
+  {
+   "date": "2023-09",
+   "price": 34.97,
+   "dd": -43.7
+  },
+  {
+   "date": "2023-10",
+   "price": 35.9,
+   "dd": -42.2
+  },
+  {
+   "date": "2023-11",
+   "price": 44.11,
+   "dd": -29.0
+  },
+  {
+   "date": "2023-12",
+   "price": 49.59,
+   "dd": -20.1
+  },
+  {
+   "date": "2024-01",
+   "price": 42.51,
+   "dd": -31.5
+  },
+  {
+   "date": "2024-02",
+   "price": 42.61,
+   "dd": -31.4
+  },
+  {
+   "date": "2024-03",
+   "price": 43.71,
+   "dd": -29.6
+  },
+  {
+   "date": "2024-04",
+   "price": 30.16,
+   "dd": -43.4
+  },
+  {
+   "date": "2024-05",
+   "price": 30.66,
+   "dd": -42.4
+  },
+  {
+   "date": "2024-06",
+   "price": 30.77,
+   "dd": -41.5
+  },
+  {
+   "date": "2024-07",
+   "price": 30.55,
+   "dd": -41.1
+  },
+  {
+   "date": "2024-08",
+   "price": 22.04,
+   "dd": -57.5
+  },
+  {
+   "date": "2024-09",
+   "price": 23.46,
+   "dd": -54.8
+  },
+  {
+   "date": "2024-10",
+   "price": 21.52,
+   "dd": -58.5
+  },
+  {
+   "date": "2024-11",
+   "price": 24.05,
+   "dd": -53.6
+  },
+  {
+   "date": "2024-12",
+   "price": 20.05,
+   "dd": -61.3
+  },
+  {
+   "date": "2025-01",
+   "price": 19.43,
+   "dd": -61.2
+  },
+  {
+   "date": "2025-02",
+   "price": 23.73,
+   "dd": -52.6
+  },
+  {
+   "date": "2025-03",
+   "price": 22.71,
+   "dd": -54.7
+  },
+  {
+   "date": "2025-04",
+   "price": 20.1,
+   "dd": -59.9
+  },
+  {
+   "date": "2025-05",
+   "price": 19.55,
+   "dd": -61.0
+  },
+  {
+   "date": "2025-06",
+   "price": 22.4,
+   "dd": -55.3
+  },
+  {
+   "date": "2025-07",
+   "price": 19.8,
+   "dd": -60.5
+  },
+  {
+   "date": "2025-08",
+   "price": 24.35,
+   "dd": -51.4
+  },
+  {
+   "date": "2025-09",
+   "price": 33.55,
+   "dd": -33.0
+  },
+  {
+   "date": "2025-10",
+   "price": 39.99,
+   "dd": -20.2
+  },
+  {
+   "date": "2025-11",
+   "price": 40.56,
+   "dd": -19.0
+  },
+  {
+   "date": "2025-12",
+   "price": 36.9,
+   "dd": -26.3
+  },
+  {
+   "date": "2026-01",
+   "price": 46.47,
+   "dd": -14.5
+  },
+  {
+   "date": "2026-02",
+   "price": 45.61,
+   "dd": -16.0
+  },
+  {
+   "date": "2026-03",
+   "price": 44.13,
+   "dd": -18.8
+  },
+  {
+   "date": "2026-04",
+   "price": 94.48,
+   "dd": -0.3
+  },
+  {
+   "date": "2026-05",
+   "price": 114.68,
+   "dd": -11.4
+  },
+  {
+   "date": "2026-06",
+   "price": 139.63,
+   "dd": -0.9
+  },
+  {
+   "date": "2026-07",
+   "price": 90.2,
+   "dd": -36.0
+  }
+ ],
+ "holdout": [
+  {
+   "strategy": "Momentum top20%, 20 pos, 6m hold",
+   "train_excess": 1.43,
+   "test_cagr": 17.78,
+   "test_spy": 14.48,
+   "test_excess": 3.3,
+   "test_sharpe": 0.96,
+   "test_maxdd": -27.1,
+   "spy_maxdd": -33.7
+  },
+  {
+   "strategy": "+ SPY regime filter",
+   "train_excess": 2.08,
+   "test_cagr": 8.44,
+   "test_spy": 14.48,
+   "test_excess": -6.04,
+   "test_sharpe": 0.53,
+   "test_maxdd": -35.2,
+   "spy_maxdd": -33.7
+  },
+  {
+   "strategy": "+ volatility cap",
+   "train_excess": 2.18,
+   "test_cagr": 16.35,
+   "test_spy": 14.48,
+   "test_excess": 1.87,
+   "test_sharpe": 0.9,
+   "test_maxdd": -27.1,
+   "spy_maxdd": -33.7
+  },
+  {
+   "strategy": "Momentum top10% (more selective)",
+   "train_excess": -0.01,
+   "test_cagr": 14.07,
+   "test_spy": 14.48,
+   "test_excess": -0.41,
+   "test_sharpe": 0.73,
+   "test_maxdd": -29.4,
+   "spy_maxdd": -33.7
+  },
+  {
+   "strategy": "Momentum 6m lookback, 3m hold",
+   "train_excess": -4.2,
+   "test_cagr": 11.65,
+   "test_spy": 14.48,
+   "test_excess": -2.83,
+   "test_sharpe": 0.62,
+   "test_maxdd": -28.6,
+   "spy_maxdd": -33.7
+  }
+ ],
+ "yearly": [
+  {
+   "year": 2008,
+   "strategy": -36.5,
+   "spy": -36.8,
+   "excess": 0.3
+  },
+  {
+   "year": 2009,
+   "strategy": 14.2,
+   "spy": 26.4,
+   "excess": -12.1
+  },
+  {
+   "year": 2010,
+   "strategy": 36.2,
+   "spy": 15.1,
+   "excess": 21.2
+  },
+  {
+   "year": 2011,
+   "strategy": -1.7,
+   "spy": 1.9,
+   "excess": -3.6
+  },
+  {
+   "year": 2012,
+   "strategy": 11.3,
+   "spy": 16.0,
+   "excess": -4.6
+  },
+  {
+   "year": 2013,
+   "strategy": 34.5,
+   "spy": 32.3,
+   "excess": 2.2
+  },
+  {
+   "year": 2014,
+   "strategy": 11.8,
+   "spy": 13.5,
+   "excess": -1.7
+  },
+  {
+   "year": 2015,
+   "strategy": 6.6,
+   "spy": 1.2,
+   "excess": 5.4
+  },
+  {
+   "year": 2016,
+   "strategy": 7.3,
+   "spy": 12.0,
+   "excess": -4.7
+  },
+  {
+   "year": 2017,
+   "strategy": 37.9,
+   "spy": 21.7,
+   "excess": 16.2
+  },
+  {
+   "year": 2018,
+   "strategy": -4.8,
+   "spy": -4.6,
+   "excess": -0.3
+  },
+  {
+   "year": 2019,
+   "strategy": 38.1,
+   "spy": 31.2,
+   "excess": 6.8
+  },
+  {
+   "year": 2020,
+   "strategy": 57.9,
+   "spy": 18.3,
+   "excess": 39.5
+  },
+  {
+   "year": 2021,
+   "strategy": 25.4,
+   "spy": 28.7,
+   "excess": -3.3
+  },
+  {
+   "year": 2022,
+   "strategy": -13.8,
+   "spy": -18.2,
+   "excess": 4.4
+  },
+  {
+   "year": 2023,
+   "strategy": 1.5,
+   "spy": 26.2,
+   "excess": -24.7
+  },
+  {
+   "year": 2024,
+   "strategy": 30.6,
+   "spy": 24.9,
+   "excess": 5.7
+  },
+  {
+   "year": 2025,
+   "strategy": 18.4,
+   "spy": 17.7,
+   "excess": 0.6
+  },
+  {
+   "year": 2026,
+   "strategy": 15.6,
+   "spy": 10.1,
+   "excess": 5.5
+  }
+ ],
+ "coverage": {
+  "universe_total": 841,
+  "current_members": 503,
+  "left_index": 338,
+  "recovered": 158,
+  "blind": 180,
+  "blind_examples": [
+   "LEH",
+   "SIVB",
+   "FRC",
+   "FNM",
+   "FRE",
+   "JCP",
+   "EK",
+   "ABK"
+  ]
+ }
+}

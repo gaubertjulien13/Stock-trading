@@ -1,0 +1,8 @@
+# Regenerable market / filing caches (rebuild via fetch_*.py scripts)
+*.parquet
+*.pkl
+edgar_quarters/
+
+# Local alert runtime state
+recommend_alert_state.json
+recommend_alert_log.csv
