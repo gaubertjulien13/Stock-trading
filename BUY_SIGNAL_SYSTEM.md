@@ -180,6 +180,104 @@ train/test split, next-bar-open fills, and slippage. Baseline expectancy is
 
 ---
 
+## 5b. The benchmark result — does this beat just owning SPY?
+
+Added 2026-08-08 (`--benchmark`). Everything in §5 was validated on **expectancy in R
+per trade**, which turns out to be the wrong metric on its own: R ignores how much
+capital is tied up, for how long, and how many signals a 1–5 position account can
+actually take. A strategy can post positive expectancy and still lose to buy-and-hold.
+
+The portfolio test caps concurrent positions, skips signals when full, compounds
+realized equity, and compares against two controls — SPY buy-and-hold (what you'd
+otherwise do with the money) and random tickers at the same entry times with the same
+exits (what picking by coin flip would give).
+
+**At 5 concurrent positions:**
+
+| Window | Split | Strategy | SPY | Edge | Random |
+|---|---|---|---|---|---|
+| 2024-Q1 | train | +10.25% | +7.07% | +3.18pp | −6.86 ±4.28 |
+| 2024-Summer | train | +5.00% | +3.21% | +1.78pp | −9.27 ±4.55 |
+| 2024-Q4 | train | +10.09% | +5.97% | +4.12pp | −5.68 ±5.70 |
+| 2025-Q1 | train | −4.30% | −5.87% | +1.57pp | −7.39 ±5.64 |
+| 2025-Summer | train | −1.20% | +4.44% | −5.64pp | −4.80 ±4.02 |
+| **2026-Q1** | **test** | **+27.18%** | +0.41% | **+26.77pp** | +4.47 ±8.63 |
+
+Train edge **+1.00pp**, beat SPY in 4/5 train windows.
+
+**At 3 concurrent positions** (closer to how it's actually traded), the picture inverts:
+train edge **−1.63pp**, beat SPY in only **2/5** windows. The entire positive result comes
+from the single 2026-Q1 holdout (+34.42pp).
+
+### Conclusions
+
+1. **The edge over SPY is not established.** It flips sign with position count and is
+   carried by one window. The random-selection spread is **21–27pp** between the luckiest
+   and unluckiest draw; an edge of 1–5pp is not distinguishable from luck at this sample
+   size. This is the same standard the `research/` playbook applies, and by that standard
+   the answer is no.
+2. **The signal is not noise, though.** It beat random selection in **6/6** windows, with
+   random consistently at −5% to −11%. There is real short-term timing information; it is
+   just not worth more than owning the index once capital lockup is accounted for.
+3. **The edge lives entirely in a small tail.** Win 11.8%, stopped 46.1%, timeout 42.1%.
+   Average winner +2.95R, average loser −1.05R. Roughly one trade in eight produces
+   essentially all the profit.
+
+Point 3 explains the live experience better than anything else. A ~12% hit rate means
+**two flat weeks are completely expected even if the edge were real** — the sample is far
+too small to judge. It also means discretionary exits are fatal: taking profits early
+turns +2.95R winners into +1R while losers stay at −1R, which is enough to erase
+everything. The backtested result assumes every trade is held mechanically to its stop,
+target, or time stop, which is precisely the part that isn't happening live.
+
+## 5c. Exit selection redone on the portfolio metric
+
+The 1.0×/3.0× exit in §5 was chosen by maximizing R-expectancy. Re-running that selection
+under portfolio-return-vs-SPY (`--exit-benchmark`, 41 variants, selection on train windows
+only) shows the two metrics rank exits differently, and the adopted exit ranks **9th of 41**
+— negative at 5 positions (−0.42pp).
+
+Per-window edge vs SPY, the stability check that matters:
+
+| Exit | Expectancy | @3 positions, by window | @5 positions, by window |
+|---|---|---|---|
+| **fixed 1.0/3.0** (adopted) | +0.223R | −7.8, +5.5, −1.3, +0.5, −5.1, **+34.4** | +3.2, +1.8, +4.1, +1.6, −5.6, **+26.8** |
+| **trail 2.0×ATR** | +0.162R | +1.0, +8.2, +10.1, +3.9, −6.6, **+17.6** | +0.9, +2.3, +5.9, +1.5, −5.2, **+11.8** |
+| fixed 0.75/1.5 | +0.146R | −2.9, −2.8, −0.8, +5.0, +4.9, **+10.5** | −4.6, −6.3, +9.7, +1.8, −5.0, **+9.6** |
+
+**The trailing stop has lower R-expectancy but better and far more stable portfolio
+results** — positive in 10 of 12 window/position cells, and the same sign at both position
+counts in every window. The adopted fixed exit flips sign between 3 and 5 positions in two
+windows and is positive in only 3 of 6 at three positions. That is the thesis confirmed
+concretely: optimizing R picked an exit that is unstable in a real portfolio.
+
+Mechanically the trail stops out less (36.1% vs 45.7%) and times out more (54.9% vs 42.4%).
+It lets winners run instead of waiting for a 3×ATR target that arrives only ~12% of the
+time, and it converts "when do I sell?" from a judgment call into a rule.
+
+**Caveats that keep this from being a green light.** Every magnitude here (+1 to +10pp) sits
+below the 21–27pp random-selection spread, so none of it is distinguishable from luck. 41
+variants were swept, so the top train performer is partly selection noise — the case for the
+trail rests on consistency, not on being the highest scorer (it ranked 6th on train). And
+2025-Summer is negative for every variant tested, which suggests a regime the system handles
+badly rather than a fixable exit problem.
+
+**Recommendation:** if the system is traded at all, a 2.0×ATR trailing stop is better
+supported than the current fixed 1.0×/3.0×, and it removes the discretionary sell decision.
+It is not evidence that the system beats owning the index.
+
+```bash
+./venv/bin/python backtest_harness.py --interval 1h --threshold 11 --subset-size 300 \
+  --non-overlapping --regime-filtered --exit-benchmark --max-positions 5
+```
+
+```bash
+./venv/bin/python backtest_harness.py --interval 1h --threshold 11 --subset-size 300 \
+  --non-overlapping --regime-filtered --benchmark --max-positions 5 --benchmark-runs 25
+```
+
+---
+
 ## 6. Rejected changes — **do not retry without new evidence**
 
 These were tested properly and failed. Documented so we don't burn time re-testing.
@@ -228,6 +326,30 @@ raw pool, which beat the rejects. But the underlying signal engine had a poor we
 and zero trades reached the 3×ATR target. **Live edge remains unproven**; the
 +0.19R backtest expectancy has not yet shown up in live results.
 
+**Week of Aug 3–7, 2026** (SPY **+3.51%**): 422 signals, 310 non-vetoed. Simulated on real
+15m data, non-vetoed alerts averaged **+0.12R** with 58% winners and only 13% stopped —
+but **zero of 295 reached the 3×ATR target**, and holding them to Friday returned
+**+0.50% against SPY's +3.51%**. Positive in R, badly behind the index in money. The vetoes
+again did their job (non-vetoed +0.12R vs vetoed −0.13R).
+
+That is two consecutive weeks trailing SPY, which §5b says is expected noise for a 12%
+hit-rate system rather than proof of failure — but it is also not evidence of an edge.
+
+**Intel funnel, same week.** Worth recording because the conclusion is counterintuitive:
+the three STRONG names averaged **+1.86%, trailing SPY by 1.65pp**, while the 40 WATCH
+names averaged **+5.62%**, beating it by 2.11pp. The ranking was inverted. BSX +5.52% was a
+genuine win, INTU +2.90% actually lagged the index despite feeling like one, and FISV
+−2.84% was the STRONG name that got skipped. Five days cannot validate a weeks-to-months
+thesis, but the funnel's own 19-year backtest already reported no edge (median 12m −7.5pp
+vs SPY, 20-name portfolio CAGR 3.2% vs 11.2%).
+
+The Intel funnel's Stage-2 score was subsequently validated over 19 years and found to
+carry **no rank information** (IC ≈ 0 at every horizon, quintiles sloping the wrong way,
+STRONG's mean driven by three outliers while its median pick loses money). See the
+Stage-2 section of `research/FUNNEL.md`. That closes the last untested selection idea in
+this repo — every stock-selection approach here has now been measured and none beats the
+index.
+
 Regime history: no signals were logged between Jul 24 and Jul 31. The regime
 check confirmed **caution on every one of those sessions** (SPY below SMA50 while
 breadth stayed healthy at 66–72%), so the six-session silence was correct behavior,
@@ -255,6 +377,9 @@ Useful harness invocations:
 ```bash
 # full validation run
 ./venv/bin/python backtest_harness.py --interval 1h --subset-size 500 --threshold 11 --regime-filtered
+
+# the one that matters: portfolio return vs SPY and vs random selection
+./venv/bin/python backtest_harness.py ... --benchmark --max-positions 5 --benchmark-runs 25
 
 # specific experiments
 ./venv/bin/python backtest_harness.py ... --sector-analysis   # sector veto, caps, regime exits
