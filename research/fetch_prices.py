@@ -17,7 +17,8 @@ DATA = Path(__file__).parent / 'data'
 DATA.mkdir(exist_ok=True)
 
 START = '2006-01-01'
-END = '2026-08-01'
+# yfinance treats `end` as exclusive, so reach past today to include the latest close.
+END = (pd.Timestamp.today().normalize() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 BATCH = 40
 
 # Sector / industry proxies, plus the market benchmark.
