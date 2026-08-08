@@ -12,3 +12,8 @@ backtest_summary.csv
 # Backtest data cache (large; regenerated on demand)
 data_cache/
 *.pkl
+
+# SEC XBRL caches (~50MB, refetched on demand); dossier markdown stays tracked
+research/data/fundamentals/
+research/data/sec_ticker_cik.json
+research/data/dossier_*.json
