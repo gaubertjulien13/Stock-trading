@@ -255,8 +255,11 @@ and many small trades; 20bps of round-trip friction eats more than half of it.
 
 - **Sentiment.** The "articles and social posts" pillar. No usable free historical archive
   exists. Forward-testable only.
-- **Fundamentals.** yfinance returns *today's* balance sheet, not what was knowable then.
-  Any quality filter built on it leaks the future.
+- **Fundamentals.** yfinance returns *today's* balance sheet, not what was knowable then,
+  so any quality filter built on it leaks the future. This is no longer a hard limit:
+  `fetch_fundamentals.py` pulls point-in-time figures from SEC XBRL company facts, dated
+  by filing. It was written for the dossier layer and has not been used to build or test
+  a quality filter, so the conclusions above still exclude fundamentals entirely.
 
 ## Reproduce
 
