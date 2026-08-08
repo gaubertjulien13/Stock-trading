@@ -11,7 +11,7 @@ Three untested assumptions in the earlier pipeline could each flip the answer:
 3. DELISTINGS. Returns were filled with 0 when a ticker stopped trading, so a
    position held into a bankruptcy silently returned 0% instead of -100%.
 
-Run:  venv/bin/python3 research/verify.py
+Run:  venv/bin/python3 research/validate_assumptions.py
 """
 
 import pickle

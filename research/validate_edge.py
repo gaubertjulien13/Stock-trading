@@ -1,13 +1,13 @@
 """Is there enough edge here to be worth trading? The decisive tests.
 
-verify.py showed that picking 20 of ~100 qualifying momentum names moves the
+validate_assumptions.py showed that picking 20 of ~100 qualifying momentum names moves the
 result by +/-3% CAGR depending purely on which arbitrary 20 you take. That is
 selection noise, not edge. Two questions follow:
 
 1. If the book is widened until selection noise disappears, what edge is left?
 2. Is whatever remains persistent, or does it come from a handful of years?
 
-Run:  venv/bin/python3 research/verify2.py
+Run:  venv/bin/python3 research/validate_edge.py
 """
 
 import pickle

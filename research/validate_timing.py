@@ -10,7 +10,7 @@ That is a conditional question and it has a different answer. Here the candidate
 set is held fixed -- names shaped like Intel in mid-2025 -- and only the entry
 timing and exit policy are varied.
 
-Run:  venv/bin/python3 research/verify3.py
+Run:  venv/bin/python3 research/validate_timing.py
 """
 
 import pickle

@@ -261,10 +261,10 @@ and many small trades; 20bps of round-trip friction eats more than half of it.
 ## Reproduce
 
 ```
-venv/bin/python3 research/verify.py     # benchmark, selection rule, delisting assumptions
-venv/bin/python3 research/verify2.py    # concentration vs luck; is the edge persistent
-venv/bin/python3 research/verify3.py    # entry timing and exit policy, candidates held fixed
-venv/bin/python3 research/smid_test.py  # the same setups in mid and small caps
+venv/bin/python3 research/validate_assumptions.py  # benchmark, selection rule, delisting assumptions
+venv/bin/python3 research/validate_edge.py         # concentration vs luck; is the edge persistent
+venv/bin/python3 research/validate_timing.py       # entry timing and exit policy, candidates held fixed
+venv/bin/python3 research/smid_test.py             # the same setups in mid and small caps
 ```
 
 Rebuild the mid/small-cap data first with `build_universe_smid.py` then
