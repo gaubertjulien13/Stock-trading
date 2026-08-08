@@ -1376,6 +1376,352 @@ def compare_exits(entries, arrays, hold_bars, slippage_bps, regime_filtered):
 # Main
 # =========================================================================
 
+# =========================================================================
+# Portfolio benchmark: does the signal beat simply owning the index?
+# =========================================================================
+# expectancy_stats measures R per trade, which can be positive while the
+# strategy still trails buy-and-hold: R ignores how much capital was tied up,
+# how long, and how many signals a small account could actually take. These
+# functions answer the only question that decides whether to trade the system:
+# after capping concurrent positions, did it beat SPY, and did it beat picking
+# the same number of names at random on the same days?
+
+def build_timeline(entries, arrays, resolve_fn, hold_bars, slippage_bps):
+    """Resolve entries into trades carrying wall-clock entry/exit timestamps.
+
+    resolve_entries returns positional bar offsets, which are enough for R stats
+    but not for a portfolio: overlapping positions have to compete for slots in
+    real time, so exits need timestamps that are comparable across tickers.
+    """
+    slip = slippage_bps / 1e4
+    rows = []
+    for e in entries:
+        a = arrays.get(e['ticker'])
+        if a is None:
+            continue
+        result, exit_px, bars_held, risk = resolve_fn(
+            a['high'], a['low'], a['close'], e['entry_idx'],
+            e['entry_price'], e['daily_atr'], hold_bars,
+        )
+        if risk <= 0:
+            continue
+        idx = a['index']
+        exit_pos = min(e['entry_idx'] + bars_held, len(idx) - 1)
+        entry = e['entry_price']
+        row = dict(e)
+        row.update({
+            'result': result, 'exit_price': exit_px, 'bars_held': bars_held,
+            'entry_ts': idx[e['entry_idx']], 'exit_ts': idx[exit_pos],
+            'r_multiple': (exit_px - entry) / risk - slip * (entry + exit_px) / risk,
+            'pct_return': ((exit_px - entry) / entry) * 100 - slip * 200,
+        })
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def simulate_portfolio(trades, max_positions):
+    """Equal-weight portfolio with a hard cap on concurrent positions.
+
+    Signals arriving while every slot is full are skipped, not queued - that is
+    what actually happens to an account holding 1-5 names. Returns realized
+    equity, so a strategy that ties up capital in slow trades is penalized the
+    way it is penalized in reality.
+    """
+    if trades is None or trades.empty:
+        return None
+    t = trades.sort_values('entry_ts')
+    cash = 1.0
+    open_pos = []           # (exit_ts, size, pct_return)
+    curve = [(t['entry_ts'].iloc[0], 1.0)]
+    taken = skipped = 0
+    slot_time = pd.Timedelta(0)
+
+    def close_due(now):
+        nonlocal cash, open_pos
+        due = [p for p in open_pos if p[0] <= now]
+        if not due:
+            return
+        open_pos = [p for p in open_pos if p[0] > now]
+        held = sum(s for _, s, _ in open_pos)
+        pending = sum(s for _, s, _ in due)
+        for ex_ts, size, pct in sorted(due, key=lambda x: x[0]):
+            cash += size * (1 + pct / 100.0)
+            pending -= size
+            curve.append((ex_ts, cash + held + pending))
+
+    for _, r in t.iterrows():
+        close_due(r['entry_ts'])
+        equity_now = cash + sum(s for _, s, _ in open_pos)
+        size = equity_now / max_positions
+        if len(open_pos) >= max_positions or size > cash + 1e-12:
+            skipped += 1
+            continue
+        cash -= size
+        open_pos.append((r['exit_ts'], size, r['pct_return']))
+        slot_time += (r['exit_ts'] - r['entry_ts'])
+        taken += 1
+
+    remaining = sorted(open_pos, key=lambda x: x[0])
+    held = sum(s for _, s, _ in remaining)
+    for ex_ts, size, pct in remaining:
+        cash += size * (1 + pct / 100.0)
+        held -= size
+        curve.append((ex_ts, cash + held))
+
+    eq = pd.Series([v for _, v in curve], index=[ts for ts, _ in curve]).sort_index()
+    peak = eq.cummax()
+    span = t['exit_ts'].max() - t['entry_ts'].min()
+    utilization = (slot_time / (span * max_positions) * 100.0) if span.total_seconds() > 0 else np.nan
+    return {
+        'total_return': (cash - 1.0) * 100.0,
+        'max_dd': ((eq / peak - 1.0).min()) * 100.0,
+        'taken': taken, 'skipped': skipped, 'signals': len(t),
+        'utilization': utilization,
+        'equity': eq,
+    }
+
+
+def _spy_window_return(spy_close, start, end):
+    s = spy_close.loc[(spy_close.index >= pd.Timestamp(start)) & (spy_close.index <= pd.Timestamp(end))]
+    if len(s) < 2:
+        return np.nan
+    return (float(s.iloc[-1]) / float(s.iloc[0]) - 1.0) * 100.0
+
+
+def random_control(entries, arrays, provider, subset, resolve_fn, hold_bars,
+                   slippage_bps, max_positions, runs=20, seed=0):
+    """Same entry times and exit rules, random tickers.
+
+    This is the control that matters. If the real signal cannot beat a coin flip
+    taking positions on the same days, the scoring logic is decoration - the
+    returns are coming from being long stocks, not from stock selection.
+    """
+    rng = np.random.default_rng(seed)
+    pool = [t for t in subset if t in arrays]
+    if not pool:
+        return None
+    results = []
+    for _ in range(runs):
+        fake = []
+        for e in entries:
+            src = arrays.get(e['ticker'])
+            if src is None:
+                continue
+            when = src['index'][e['entry_idx']]
+            tkr = pool[rng.integers(len(pool))]
+            a = arrays[tkr]
+            pos = int(np.searchsorted(a['index'], when))
+            if pos >= len(a['index']) - 1:
+                continue
+            ctx = provider.get(tkr, a['index'][pos].date())
+            if ctx is None:
+                continue
+            atr = ctx.get('daily_atr', np.nan)
+            px = float(a['open'][pos])
+            if not (np.isfinite(atr) and atr > 0 and np.isfinite(px)):
+                continue
+            fake.append({'ticker': tkr, 'entry_idx': pos, 'entry_price': px,
+                         'daily_atr': atr, 'window': e['window'], 'split': e['split']})
+        tl = build_timeline(fake, arrays, resolve_fn, hold_bars, slippage_bps)
+        sim = simulate_portfolio(tl, max_positions)
+        if sim:
+            results.append(sim['total_return'])
+    if not results:
+        return None
+    return {'mean': float(np.mean(results)), 'std': float(np.std(results)),
+            'lo': float(np.min(results)), 'hi': float(np.max(results)), 'runs': len(results)}
+
+
+def benchmark_test(entries, arrays, provider, subset, spy_close, windows, hold_bars,
+                   slippage_bps, stop_mult, target_mult, regime_filtered,
+                   max_positions, band, runs):
+    resolve_fn = (lambda s, t: (lambda *a: resolve_fixed(*a, stop_mult=s, target_mult=t)))(
+        stop_mult, target_mult)
+
+    ent = list(entries)
+    if regime_filtered:
+        ent = [e for e in ent if e.get('regime_ok')]
+    if band is not None:
+        lo, hi = band
+        ent = [e for e in ent if lo <= e.get('stk_ret_5d', 0.0) <= hi]
+
+    print(f"\n{'=' * 78}")
+    print("  PORTFOLIO BENCHMARK - does this beat owning the index?")
+    print(f"  max concurrent positions: {max_positions}   exit: {stop_mult}x/{target_mult}x ATR")
+    print(f"  filters: regime={'on' if regime_filtered else 'off'}  "
+          f"momentum band={f'{band[0]}..{band[1]}%' if band else 'off'}")
+    print(f"{'=' * 78}")
+
+    tl_all = build_timeline(ent, arrays, resolve_fn, hold_bars, slippage_bps)
+    if tl_all.empty:
+        print("  no trades")
+        return
+
+    hdr = (f"\n  {'window':14s} {'split':5s} {'signals':>8s} {'taken':>6s} {'used%':>6s} "
+           f"{'strategy':>9s} {'SPY':>8s} {'edge':>8s} {'random':>16s} {'realDD':>7s}")
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 3))
+
+    rows = []
+    for w in windows:
+        sub = tl_all[tl_all['window'] == w['name']]
+        if sub.empty:
+            continue
+        sim = simulate_portfolio(sub, max_positions)
+        spy_r = _spy_window_return(spy_close, w['start'], w['end'])
+        went = [e for e in ent if e['window'] == w['name']]
+        rc = random_control(went, arrays, provider, subset, resolve_fn, hold_bars,
+                            slippage_bps, max_positions, runs=runs, seed=abs(hash(w['name'])) % 10000)
+        rand_s = f"{rc['mean']:+6.2f}±{rc['std']:4.2f}" if rc else "     n/a"
+        print(f"  {w['name']:14s} {w['split']:5s} {sim['signals']:8d} {sim['taken']:6d} "
+              f"{sim['utilization']:5.0f}% {sim['total_return']:+8.2f}% {spy_r:+7.2f}% "
+              f"{sim['total_return'] - spy_r:+7.2f}pp {rand_s:>16s} {sim['max_dd']:6.1f}%")
+        rows.append({'window': w['name'], 'split': w['split'], 'strat': sim['total_return'],
+                     'spy': spy_r, 'edge': sim['total_return'] - spy_r,
+                     'rand': rc['mean'] if rc else np.nan,
+                     'rand_hi': rc['hi'] if rc else np.nan,
+                     'rand_lo': rc['lo'] if rc else np.nan})
+
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
+    print()
+    for split in ('train', 'test'):
+        d = df[df['split'] == split]
+        if d.empty:
+            continue
+        print(f"  {split.upper():5s}  strategy {d['strat'].mean():+6.2f}%   "
+              f"SPY {d['spy'].mean():+6.2f}%   edge {d['edge'].mean():+6.2f}pp   "
+              f"beat SPY in {int((d['edge'] > 0).sum())}/{len(d)} windows   "
+              f"beat random in {int((d['strat'] > d['rand']).sum())}/{len(d)}")
+
+    print(f"\n  ALL    strategy {df['strat'].mean():+6.2f}%   SPY {df['spy'].mean():+6.2f}%   "
+          f"edge {df['edge'].mean():+6.2f}pp   beat SPY in {int((df['edge'] > 0).sum())}/{len(df)} windows")
+    luck = (df['rand_hi'] - df['rand_lo']).mean()
+    print(f"  Random-selection spread across windows: {luck:.2f}pp average "
+          f"(best minus worst draw) - an edge smaller than this is not distinguishable from luck.")
+
+
+def build_exit_grid(hold_bars):
+    """Wider exit grid for the portfolio sweep.
+
+    compare_exits ranks these by R-expectancy. This grid exists to rank them by
+    portfolio return against SPY instead, which is a different question: a tight
+    stop can raise R while parking capital in trades that never resolve.
+    Hold length is swept too, since 42% of trades exit on the time stop.
+    """
+    grid = []
+    for sm in (0.75, 1.0, 1.5, 2.0):
+        for tm in (1.5, 2.0, 3.0):
+            for hname, hmult in (('.5x', 0.5), ('1x', 1.0), ('2x', 2.0)):
+                grid.append((
+                    f'fixed {sm}/{tm} hold{hname}',
+                    (lambda s, t: (lambda *a: resolve_fixed(*a, stop_mult=s, target_mult=t)))(sm, tm),
+                    max(2, int(hold_bars * hmult)),
+                ))
+    for tr in (1.5, 2.0, 2.5, 3.0):
+        grid.append((f'trail {tr}xATR',
+                     (lambda v: (lambda *a: resolve_trail(*a, trail_mult=v)))(tr), hold_bars))
+    grid.append(('scaleout 1.5+trail2.0',
+                 lambda *a: resolve_scaleout(*a, trail_mult=2.0, partial_mult=1.5), hold_bars))
+    return grid
+
+
+def exit_benchmark(entries, arrays, spy_close, windows, hold_bars, slippage_bps,
+                   regime_filtered, band, positions=(3, 5)):
+    """Rank exit strategies by portfolio return vs SPY, choosing on train windows only.
+
+    The adopted 1.0x/3.0x exit was selected by maximizing R-expectancy, which the
+    portfolio benchmark showed can be positive while the strategy trails the index.
+    This re-runs that selection under the metric that actually decides whether the
+    system deserves capital.
+    """
+    ent = list(entries)
+    if regime_filtered:
+        ent = [e for e in ent if e.get('regime_ok')]
+    if band is not None:
+        lo, hi = band
+        ent = [e for e in ent if lo <= e.get('stk_ret_5d', 0.0) <= hi]
+
+    spy_by_w = {w['name']: _spy_window_return(spy_close, w['start'], w['end']) for w in windows}
+    train_w = [w['name'] for w in windows if w['split'] == 'train']
+    test_w = [w['name'] for w in windows if w['split'] == 'test']
+
+    grid = build_exit_grid(hold_bars)
+    print(f"\n{'=' * 92}")
+    print("  EXIT SELECTION BY PORTFOLIO RETURN vs SPY")
+    print(f"  {len(grid)} variants x {len(windows)} windows, positions={positions}")
+    print("  Selection is on TRAIN windows only; test column is shown for the finalists.")
+    print(f"{'=' * 92}")
+
+    rows = []
+    for i, (name, fn, hold) in enumerate(grid, 1):
+        print(f"\r  evaluating {i}/{len(grid)}: {name:34s}", end='', flush=True)
+        tl = build_timeline(ent, arrays, fn, hold, slippage_bps)
+        if tl.empty:
+            continue
+        rec = {'variant': name}
+        ok = True
+        for p in positions:
+            edges = {}
+            for w in windows:
+                sub = tl[tl['window'] == w['name']]
+                sim = simulate_portfolio(sub, p)
+                if sim is None or not np.isfinite(spy_by_w[w['name']]):
+                    continue
+                edges[w['name']] = sim['total_return'] - spy_by_w[w['name']]
+            if not edges:
+                ok = False
+                break
+            tr = [edges[n] for n in train_w if n in edges]
+            te = [edges[n] for n in test_w if n in edges]
+            rec[f'train{p}'] = float(np.mean(tr)) if tr else np.nan
+            rec[f'test{p}'] = float(np.mean(te)) if te else np.nan
+            rec[f'won{p}'] = int(sum(1 for x in tr if x > 0))
+            rec[f'n{p}'] = len(tr)
+        if ok:
+            rows.append(rec)
+    print("\r" + " " * 60 + "\r", end='')
+
+    if not rows:
+        print("  no results")
+        return
+    df = pd.DataFrame(rows)
+    p_lo, p_hi = positions[0], positions[-1]
+    # Rank on the tighter position count: that is how the account is actually run,
+    # and it is the setting where the adopted exit failed.
+    df['robust'] = df[[f'train{p}' for p in positions]].min(axis=1)
+    df = df.sort_values(f'train{p_lo}', ascending=False)
+
+    print(f"\n  {'variant':34s} {'train@' + str(p_lo):>9s} {'won':>5s} "
+          f"{'train@' + str(p_hi):>9s} {'won':>5s} {'worst':>8s}")
+    print("  " + "-" * 78)
+    for _, r in df.head(14).iterrows():
+        print(f"  {r['variant']:34s} {r[f'train{p_lo}']:+8.2f}pp "
+              f"{int(r[f'won{p_lo}'])}/{int(r[f'n{p_lo}'])} "
+              f"{r[f'train{p_hi}']:+8.2f}pp {int(r[f'won{p_hi}'])}/{int(r[f'n{p_hi}'])} "
+              f"{r['robust']:+7.2f}pp")
+
+    adopted = df[df['variant'].str.startswith('fixed 1.0/3.0 hold1x')]
+    if not adopted.empty:
+        a = adopted.iloc[0]
+        print(f"\n  Currently adopted (fixed 1.0/3.0 hold1x): train@{p_lo} {a[f'train{p_lo}']:+.2f}pp, "
+              f"train@{p_hi} {a[f'train{p_hi}']:+.2f}pp, "
+              f"rank {int(df.index.get_loc(a.name)) + 1} of {len(df)}")
+
+    finalists = df[df['robust'] > 0].head(5)
+    print(f"\n  Finalists (positive at every position count), test window revealed:")
+    if finalists.empty:
+        print("    NONE - no exit variant beats SPY across train windows at both position counts.")
+    else:
+        for _, r in finalists.iterrows():
+            print(f"    {r['variant']:34s} train@{p_lo} {r[f'train{p_lo}']:+6.2f}pp  "
+                  f"train@{p_hi} {r[f'train{p_hi}']:+6.2f}pp  ->  "
+                  f"TEST@{p_lo} {r[f'test{p_lo}']:+7.2f}pp  TEST@{p_hi} {r[f'test{p_hi}']:+7.2f}pp")
+    print("\n  Note: entries were collected under the adopted exit's hold, so non-overlapping\n"
+          "  spacing is held fixed across variants - exits are compared on identical entries.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hardened multi-period backtest harness")
     parser.add_argument("--interval", default="1h", help="Bar interval (default 1h; 15m = recent confirmation)")
@@ -1413,6 +1759,16 @@ def main():
     parser.add_argument("--recent-only", action="store_true",
                         help="Use one recent ~55d window regardless of interval "
                              "(for fair 1h vs 15m comparisons)")
+    parser.add_argument("--benchmark", action="store_true",
+                        help="Portfolio test vs SPY buy-and-hold and vs random selection")
+    parser.add_argument("--max-positions", type=int, default=5,
+                        help="Concurrent position cap for the portfolio test (default 5)")
+    parser.add_argument("--benchmark-runs", type=int, default=20,
+                        help="Random-selection draws per window (default 20)")
+    parser.add_argument("--no-band", action="store_true",
+                        help="Disable the live momentum band filter in the portfolio test")
+    parser.add_argument("--exit-benchmark", action="store_true",
+                        help="Rank exit strategies by portfolio return vs SPY (train-only selection)")
     args = parser.parse_args()
 
     if args.recent_only:
@@ -1471,7 +1827,16 @@ def main():
         entries.extend(ent)
         print(f"  {w['name']:14s} -> {len(ent):4d} entries")
 
-    if args.entry_timing:
+    if args.exit_benchmark:
+        exit_benchmark(entries, arrays, spy_close, windows, hold_bars, args.slippage_bps,
+                       args.regime_filtered, None if args.no_band else (-6.0, 6.0),
+                       positions=(3, args.max_positions))
+    elif args.benchmark:
+        benchmark_test(entries, arrays, provider, subset, spy_close, windows, hold_bars,
+                       args.slippage_bps, args.stop_mult, args.target_mult,
+                       args.regime_filtered, args.max_positions,
+                       None if args.no_band else (-6.0, 6.0), args.benchmark_runs)
+    elif args.entry_timing:
         entry_timing_test(entries, arrays, hold_bars, args.slippage_bps,
                           args.stop_mult, args.target_mult, args.regime_filtered,
                           wait_bars=bars_per_day)
