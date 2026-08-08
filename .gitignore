@@ -17,3 +17,7 @@ data_cache/
 research/data/fundamentals/
 research/data/sec_ticker_cik.json
 research/data/dossier_*.json
+
+# The journal is the one CSV worth keeping: decisions recorded before outcomes
+# are known, which is the only forward test of the judgment layer.
+!research/data/decision_journal.csv

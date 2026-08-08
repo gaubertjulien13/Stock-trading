@@ -178,7 +178,24 @@ that win produces a majority of losers.
 
 ## Reproduce / run
 
+### Refreshing the data first
+
+Everything downstream reads cached panels, so a scan run without refreshing silently
+reports last week's candidates at last week's prices.
+
 ```
+venv/bin/python3 research/fetch_prices.py                # ~3 min, full re-download
+venv/bin/python3 research/run_experiments.py --rebuild   # ~8 min, regenerates features.pkl
+venv/bin/python3 research/factor_power.py                # writes clean.pkl
+```
+
+`--rebuild` is mandatory. Without it `run_experiments.py` loads the existing
+`features.pkl` and the fresh prices never reach `clean.pkl`.
+
+### Scanning
+
+```
+venv/bin/python3 research/dossier.py --top 12       # evidence briefs for the judgment layer
 venv/bin/python3 research/recommend.py              # scan as-of latest cached date
 venv/bin/python3 research/recommend.py --asof 2024-05-10   # historical freeze (INTC era)
 venv/bin/python3 research/recommend.py --news               # fetch yfinance headlines for top names
