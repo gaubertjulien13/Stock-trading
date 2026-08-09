@@ -19,6 +19,11 @@ research/data/sec_ticker_cik.json
 research/data/dossier_*.json
 research/data/company_profiles.json
 
-# The journal is the one CSV worth keeping: decisions recorded before outcomes
-# are known, which is the only forward test of the judgment layer.
-!research/data/decision_journal.csv
+# The decision journal stays local. It is the forward test of the judgment
+# layer and worth preserving, but it records positions, entry prices, sizing
+# and private reasoning, and this repository is public. Back it up somewhere
+# private instead.
+
+# Personal files that happen to live in this directory.
+*.numbers
+send_worldcup_invites.py
