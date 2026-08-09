@@ -1,7 +1,7 @@
 """
 Hardened, multi-period backtest harness for the buy-signal scoring system.
 
-This generalizes backtest_february.py and fixes its lookahead bias. The key
+This replaces an earlier single-month backtest and fixes its lookahead bias. The key
 correctness change: daily trend context (SMA200, ADX, ATR, relative strength,
 and the market regime) is evaluated *as of each trade's own date* using only
 the most recent COMPLETED daily bar (day D-1) — never end-of-window data.
