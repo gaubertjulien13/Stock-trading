@@ -40,13 +40,22 @@ def load():
     if not JOURNAL.exists():
         return pd.DataFrame(columns=COLUMNS)
     df = pd.read_csv(JOURNAL)
-    df['date'] = pd.to_datetime(df['date'])
+    # 'mixed' tolerates files written before dates were normalised on save.
+    df['date'] = pd.to_datetime(df['date'], format='mixed')
     return df
 
 
 def save(df):
+    """Dates are written date-only so the file never gains mixed formats.
+
+    Round-tripping a parsed Timestamp writes '2026-08-09 00:00:00' while a fresh
+    entry writes '2026-08-09'. Once both are present, reading the file back
+    raises, which surfaces as the journal breaking on the third entry.
+    """
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(JOURNAL, index=False)
+    out = df.copy()
+    out['date'] = pd.to_datetime(out['date'], format='mixed').dt.strftime('%Y-%m-%d')
+    out.to_csv(JOURNAL, index=False)
 
 
 def _price_now(ticker):
