@@ -3,8 +3,9 @@
 A recommendation and evidence tool, **not** a trading signal. It puts damaged
 large caps on your desk with the facts assembled; every buy and sell is your call.
 
-Read `FUNNEL.md` for the design, `PLAYBOOK.md` for why the mechanical version
-doesn't work on its own, and `ANALOGS.md` for what separated the historical winners.
+Read `HOW_TO_USE.md` to run it. For the reasoning behind it: `FUNNEL.md` for the
+design, `PLAYBOOK.md` for why the mechanical version doesn't work on its own, and
+`ANALOGS.md` for what separated the historical winners.
 
 ## Start here
 
