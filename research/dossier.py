@@ -26,6 +26,7 @@ later runs reuse it and refresh entries older than a month.
 import argparse
 import json
 import pickle
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -246,6 +247,99 @@ def eps_context(ticker, profiles, pool):
     fe, fpe_med = me.get('forward_pe'), out['peer_forward_pe']
     if (isinstance(fe, (int, float)) and fe and fe > 0 and np.isfinite(fpe_med) and fpe_med > 0):
         out['fpe_discount_pct'] = (float(fe) / fpe_med - 1) * 100
+    return out
+
+
+DECLINE_THEMES = {
+    'guidance cut': [r'cuts? guidance', r'lowers? (guidance|outlook|forecast)', r'slashe?s',
+                     r'guidance cut', r'warns', r'outlook cut'],
+    'earnings miss': [r'\bmisses\b', r'\bmiss\b', r'disappoint\w*', r'below (estimates|expectations)',
+                      r'shortfall'],
+    'competition / share loss': [r'competition', r'market share', r'\brival', r'losing ground'],
+    'analyst downgrade': [r'downgrad\w+', r'cut to (neutral|sell|hold|underweight)'],
+    'recall / safety': [r'\brecall', r'\bsafety\b', r'fda (warning|letter)', r'adverse event'],
+    'legal / regulatory': [r'lawsuit', r'\bprobe\b', r'investigation', r'antitrust', r'settlement',
+                           r'subpoena', r'\bfine[ds]?\b'],
+    'layoffs / restructuring': [r'layoff', r'job cuts', r'restructur\w+', r'workforce reduction'],
+    'AI disruption worry': [r'\bai\b.{0,24}(disrupt|threat|replac|hollow)',
+                            r'(disrupt|threat|replac)\w*.{0,24}\bai\b'],
+    'dilution / balance sheet': [r'dilut\w+', r'stock offering', r'debt load', r'leverage',
+                                 r'refinanc\w+'],
+    'demand slowdown': [r'slow(ing|down)', r'weak demand', r'soft(ening)? demand', r'\bcooling\b'],
+}
+
+
+def _themes(headlines):
+    hits = []
+    for theme, pats in DECLINE_THEMES.items():
+        for h in headlines or []:
+            if any(re.search(p, h, re.I) for p in pats):
+                hits.append(theme)
+                break
+    return hits
+
+
+def decline_drivers(close, ticker, asof, fund, eps, headlines, months=12):
+    """What the data can say about *why* the price fell - which is less than it looks.
+
+    Three things are computable and worth stating:
+
+      1. Whether the business shrank or only the multiple did. If revenue grew
+         while the price halved, the market re-rated the name rather than the
+         earnings breaking, and the whole question becomes why the re-rating
+         happened and whether it was warranted.
+      2. Whether the decline arrived in a few discrete events or as a steady
+         grind. Concentrated drops mean identifiable news; a grind usually means
+         a slow change of mind about the multiple.
+      3. Whether those worst days landed on earnings reactions.
+
+    The actual narrative cause is not computable and is left to the headlines and
+    to the reader. This function deliberately reports evidence, not a story.
+    """
+    s = close[ticker].loc[:asof].dropna()
+    win = s.loc[s.index >= asof - pd.DateOffset(months=months)]
+    if len(win) < 60:
+        return {}
+    out = {}
+    price_ret = float(win.iloc[-1]) / float(win.iloc[0]) - 1.0
+    out['price_ret_pct'] = price_ret * 100
+
+    # Business vs multiple. Revenue is present far more often than net income.
+    rev_g = (fund or {}).get('revenue_yoy_pct', np.nan)
+    if np.isfinite(rev_g) and (1 + rev_g / 100) > 0:
+        out['revenue_yoy_pct'] = float(rev_g)
+        out['multiple_change_pct'] = ((1 + price_ret) / (1 + rev_g / 100) - 1) * 100
+    eps_g = (eps or {}).get('eps_growth_pct', np.nan)
+    if np.isfinite(eps_g):
+        out['eps_growth_pct'] = float(eps_g)
+
+    # Concentrated events vs a steady grind, measured in log space so the parts add up.
+    rets = np.log(win / win.shift(1)).dropna()
+    total = float(rets.sum())
+    if total < 0 and len(rets) > 20:
+        worst = rets.nsmallest(3)
+        out['worst_days'] = [{'date': str(d.date()), 'pct': (np.exp(v) - 1) * 100}
+                             for d, v in worst.items()]
+        out['worst3_share_pct'] = float(worst.sum() / total * 100)
+        out['concentrated'] = bool(out['worst3_share_pct'] >= 40)
+
+    if out.get('worst_days'):
+        try:
+            import yfinance as yf
+            ed = yf.Ticker(ticker).earnings_dates
+            if ed is not None and len(ed):
+                edates = {pd.Timestamp(d).tz_localize(None).normalize() for d in ed.index}
+                n = 0
+                for w in out['worst_days']:
+                    wd = pd.Timestamp(w['date'])
+                    if any(abs((wd - e).days) <= 1 for e in edates):
+                        w['earnings'] = True
+                        n += 1
+                out['worst_on_earnings'] = n
+        except Exception:
+            pass
+
+    out['themes'] = _themes(headlines)
     return out
 
 
@@ -507,6 +601,7 @@ def build(asof=None, top=12, with_news=True, news_items=8, refresh_profiles=Fals
         if with_news:
             print(f"\r  headlines {i + 1}/{len(scored)}  {t:6s}", end='', flush=True)
             heads = fetch_headlines(t, max_items=news_items)
+        why = decline_drivers(close, t, asof, fund, eps, heads)
         entries.append({
             'ticker': t,
             'name': prof.get('long_name'),
@@ -527,6 +622,7 @@ def build(asof=None, top=12, with_news=True, news_items=8, refresh_profiles=Fals
             'peers': peers,
             'industry_context': ind,
             'eps': eps,
+            'why': why,
             'trend': trend,
             'levels': levels,
             'insiders': ins,
@@ -536,6 +632,75 @@ def build(asof=None, top=12, with_news=True, news_items=8, refresh_profiles=Fals
     if with_news:
         print("\r" + " " * 40 + "\r", end='')
     return asof, entries, close.index[-1]
+
+
+def why_sentence(e, why):
+    """One paragraph on the decline, built only from what is measurable."""
+    if not why:
+        return None
+    parts = []
+    pr = why.get('price_ret_pct', np.nan)
+
+    mc, rev = why.get('multiple_change_pct', np.nan), why.get('revenue_yoy_pct', np.nan)
+    if np.isfinite(mc) and np.isfinite(rev) and np.isfinite(pr):
+        if rev > 2:
+            parts.append(
+                f"Price {_fmt_pct(pr, dp=0)} over 12 months while revenue grew "
+                f"{_fmt_pct(rev, dp=0)}, so the fall is a de-rating "
+                f"({_fmt_pct(mc, dp=0)} on the multiple), not a shrinking business")
+        elif rev < -2:
+            parts.append(
+                f"Price {_fmt_pct(pr, dp=0)} over 12 months on revenue "
+                f"{_fmt_pct(rev, dp=0)}, so the business is contracting too — "
+                f"the multiple explains {_fmt_pct(mc, dp=0)} of it")
+        else:
+            parts.append(
+                f"Price {_fmt_pct(pr, dp=0)} over 12 months on roughly flat revenue "
+                f"({_fmt_pct(rev, dp=0)}), so almost all of it is multiple compression")
+    elif np.isfinite(pr):
+        parts.append(f"Price {_fmt_pct(pr, dp=0)} over 12 months")
+
+    # Growth off a near-zero earnings base produces four-digit percentages that
+    # look like information and are not.
+    eg = why.get('eps_growth_pct', np.nan)
+    if np.isfinite(eg) and np.isfinite(rev) and abs(eg - rev) > 15 and abs(eg) <= 200:
+        parts.append(f"earnings moved {_fmt_pct(eg, dp=0)}"
+                     + (' off a low base' if abs(eg) > 100 else '')
+                     + ", apart from revenue")
+
+    wd = why.get('worst_days') or []
+    if wd and np.isfinite(why.get('worst3_share_pct', np.nan)):
+        share = why['worst3_share_pct']
+        days = ', '.join(f"{w['date']} {w['pct']:.0f}%" for w in wd)
+        n_earn = why.get('worst_on_earnings', 0)
+        earn_clause = ''
+        if n_earn:
+            earn_clause = (f", {n_earn} of them an earnings reaction" if n_earn == 1
+                           else f", {n_earn} of them earnings reactions")
+        if share > 100:
+            # The bad days outweigh the net move, so the rest of the year rose.
+            s = (f"the fall is entirely a few events — the three worst days ({days}) "
+                 f"exceed the whole net decline{earn_clause}, meaning the stock rose "
+                 f"on balance across the other days")
+        elif why.get('concentrated'):
+            s = (f"the decline is concentrated — the three worst days ({days}) are "
+                 f"{share:.0f}% of it{earn_clause}, so there are specific events to look up")
+        else:
+            s = (f"no single event dominates — the three worst days ({days}) are only "
+                 f"{share:.0f}% of the fall, which looks like a steady change of mind "
+                 f"rather than one shock")
+        parts.append(s)
+
+    th = why.get('themes') or []
+    if th:
+        parts.append(f"recent coverage clusters on {', '.join(th)}")
+
+    if not parts:
+        return None
+    body = '; '.join(parts)
+    return (body[0].upper() + body[1:] + '. '
+            + '*Mechanical read of price, filings and recent headlines — the actual '
+              'cause needs the headlines below.*')
 
 
 def render(asof, entries, latest=None):
@@ -598,6 +763,10 @@ def render(asof, entries, latest=None):
               f"{'Above' if e['above_200'] else 'Below'} the 200dma, "
               f"{'above' if e['above_50'] else 'below'} the 50dma. "
               f"Annualized vol {e['vol_ann']:.0f}%. Tag `{e['tag']}`.", '']
+
+        ws = why_sentence(e, e.get('why') or {})
+        if ws:
+            L += [f"**Why it fell.** {ws}", '']
 
         if pe.get('n_peers', 0) >= PEER_MIN:
             L += [f"**Divergence.** Return-correlation bucket {pe['industry']} is up "

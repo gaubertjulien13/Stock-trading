@@ -81,6 +81,17 @@ you are looking at a sector problem and the setup does not apply.
 
 **Setup** — drawdown, divergence, position against moving averages, volatility.
 
+**Why it fell** — a mechanical read of the decline, in three parts. First,
+whether the *business* shrank or only the *multiple* did: revenue growing while
+the price halves means the market re-rated the name rather than the earnings
+breaking, and your job becomes deciding whether that re-rating was warranted.
+Second, whether the fall arrived as a few discrete events or a steady grind —
+concentrated drops give you specific dates to research, a grind usually means a
+slow change of mind. Third, which themes the recent coverage clusters on. It
+names dates and magnitudes, and flags which of the worst days were earnings
+reactions. It does **not** tell you the actual cause; that still needs the
+headlines and your own reading.
+
 **Divergence** — how far behind its return-correlation peer group the name has
 fallen. Note this bucket is statistical, not a business grouping: it files ORCL
 under XLF. Use it for the size of the gap, not for who the rivals are.
