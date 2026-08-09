@@ -18,6 +18,9 @@ decision adds value.
 
     venv/bin/python3 research/dossier.py --top 12
     venv/bin/python3 research/dossier.py --top 12 --no-news    # skip yfinance calls
+
+The first run builds a company-profile cache over the whole index (~2 minutes);
+later runs reuse it and refresh entries older than a month.
 """
 
 import argparse
@@ -34,6 +37,8 @@ from engine import DATA
 from recommend import fetch_headlines, stage1_mask, stage2
 
 PEER_MIN = 4
+PROFILES = DATA / 'company_profiles.json'
+PROFILE_MAX_AGE_DAYS = 30
 
 
 def _fmt_money(v, unit='B'):
@@ -66,6 +71,192 @@ def load_insiders():
     df = pd.read_parquet(p)
     df['filing_date'] = pd.to_datetime(df['filing_date'])
     return df
+
+
+def _load_profiles():
+    if not PROFILES.exists():
+        return {}
+    try:
+        return json.loads(PROFILES.read_text())
+    except Exception:
+        return {}
+
+
+def fetch_profiles(tickers, refresh=False, quiet=False):
+    """Company descriptors from yfinance, cached to disk.
+
+    Needed for the things a price panel cannot say: what the company sells, which
+    industry it really competes in (the panel's label is a return-correlation
+    bucket, not a business), and where analysts think the price is going.
+
+    Cached because the competitor lookup needs the whole index, which is ~2
+    minutes of calls on a cold cache and instant afterwards. Entries older than
+    PROFILE_MAX_AGE_DAYS are refetched so market caps and targets do not rot.
+    """
+    import yfinance as yf
+
+    cache = _load_profiles()
+    cutoff = (datetime.now() - pd.Timedelta(days=PROFILE_MAX_AGE_DAYS)).isoformat()
+    todo = [t for t in tickers
+            if refresh or t not in cache or (cache[t].get('fetched') or '') < cutoff]
+
+    for i, t in enumerate(todo, 1):
+        if not quiet and (i % 25 == 0 or i == len(todo)):
+            print(f"\r  profiles {i}/{len(todo)}", end='', flush=True)
+        try:
+            info = yf.Ticker(t).info or {}
+        except Exception:
+            info = {}
+        cache[t] = {
+            'long_name': info.get('longName') or info.get('shortName'),
+            'sector': info.get('sector'),
+            'industry': info.get('industry'),
+            'summary': info.get('longBusinessSummary'),
+            'market_cap': info.get('marketCap'),
+            'ps_ttm': info.get('priceToSalesTrailing12Months'),
+            'trailing_pe': info.get('trailingPE'),
+            'forward_pe': info.get('forwardPE'),
+            'target_mean': info.get('targetMeanPrice'),
+            'target_low': info.get('targetLowPrice'),
+            'target_high': info.get('targetHighPrice'),
+            'target_n': info.get('numberOfAnalystOpinions'),
+            'recommendation': info.get('recommendationKey'),
+            'fetched': datetime.now().isoformat(),
+        }
+    if todo:
+        PROFILES.write_text(json.dumps(cache, indent=1, default=str))
+        if not quiet:
+            print(f"\r  profiles: {len(todo)} fetched, {len(cache)} cached      ")
+    return cache
+
+
+def _first_sentence(text, limit=260):
+    """yfinance summaries open with a usable one-line definition of the business."""
+    if not text:
+        return None
+    s = ' '.join(str(text).split())
+    cut = s.find('. ')
+    out = s[:cut + 1] if cut > 40 else s
+    return out if len(out) <= limit else out[:limit].rsplit(' ', 1)[0] + '…'
+
+
+def industry_context(ticker, profiles, members, ret12):
+    """Real industry peers, as opposed to the panel's correlation bucket.
+
+    The panel assigns industries by return correlation against sector ETFs, which
+    puts ORCL and CRM in XLF. That is fine for measuring divergence but useless
+    for naming competitors, so this uses the reported industry classification.
+    """
+    me = profiles.get(ticker) or {}
+    ind = me.get('industry')
+    if not ind:
+        return {}
+    pool = []
+    for t in members:
+        if t == ticker:
+            continue
+        p = profiles.get(t) or {}
+        if p.get('industry') != ind or not p.get('market_cap'):
+            continue
+        pool.append((float(p['market_cap']), t, p))
+    pool.sort(reverse=True)
+
+    ps = [float(p['ps_ttm']) for _, _, p in pool
+          if isinstance(p.get('ps_ttm'), (int, float)) and p['ps_ttm'] and p['ps_ttm'] > 0]
+    comps = [{'ticker': t, 'name': p.get('long_name'), 'market_cap': mc,
+              'ret_12m': float(ret12.get(t, np.nan)), 'ps_ttm': p.get('ps_ttm')}
+             for mc, t, p in pool[:3]]
+    return {
+        'sector': me.get('sector'),
+        'industry': ind,
+        'n_in_industry': len(pool),
+        'competitors': comps,
+        'peer_ps_median': float(np.median(ps)) if len(ps) >= 3 else np.nan,
+    }
+
+
+def _sparkline(values):
+    blocks = '▁▂▃▄▅▆▇█'
+    v = np.asarray([x for x in values if np.isfinite(x)], dtype=float)
+    if v.size < 2:
+        return ''
+    lo, hi = float(v.min()), float(v.max())
+    if hi - lo < 1e-12:
+        return blocks[0] * v.size
+    idx = np.round((v - lo) / (hi - lo) * (len(blocks) - 1)).astype(int)
+    return ''.join(blocks[i] for i in idx)
+
+
+def price_trend(close, ticker, asof, months=12):
+    """Shape of the last 12 months, from the panel so it respects --asof.
+
+    A single drawdown number cannot distinguish a name that has been bleeding all
+    year from one that bottomed six months ago and is recovering, and that
+    difference is most of what pillar 3 is asking about.
+    """
+    s = close[ticker].loc[:asof].dropna()
+    win = s.loc[s.index >= asof - pd.DateOffset(months=months)]
+    if len(win) < 30:
+        return {}
+    weekly = win.resample('W').last().dropna()
+    hi_dt, lo_dt = win.idxmax(), win.idxmin()
+    last = float(win.iloc[-1])
+
+    legs = []
+    for k in range(4, 0, -1):
+        a = asof - pd.DateOffset(months=3 * k)
+        b = asof - pd.DateOffset(months=3 * (k - 1))
+        seg = s.loc[(s.index > a) & (s.index <= b)]
+        if len(seg) > 5:
+            legs.append({'label': f"{a:%b}–{b:%b}",
+                         'ret_pct': (float(seg.iloc[-1]) / float(seg.iloc[0]) - 1) * 100})
+    return {
+        'sparkline': _sparkline(weekly.values),
+        'ret_12m_pct': (last / float(win.iloc[0]) - 1) * 100,
+        'high': float(win.max()), 'high_date': str(hi_dt.date()),
+        'low': float(win.min()), 'low_date': str(lo_dt.date()),
+        'from_high_pct': (last / float(win.max()) - 1) * 100,
+        'from_low_pct': (last / float(win.min()) - 1) * 100,
+        'legs': legs,
+        'bottom_is_recent': bool((asof - lo_dt).days <= 90),
+    }
+
+
+def reference_levels(ticker, price, close, asof, profiles, ind):
+    """Sell-side anchors. Not forecasts, and deliberately more than one.
+
+    Three independent references disagreeing is the useful signal; a single
+    number would imply a precision none of these methods has. See the caveats
+    printed alongside them in the rendered dossier.
+    """
+    prof = profiles.get(ticker) or {}
+    out = {}
+
+    s = close[ticker].loc[:asof].dropna()
+    w3 = s.loc[s.index >= asof - pd.DateOffset(years=3)]
+    if len(w3) > 60:
+        peak = float(w3.max())
+        out['peak_3y'] = peak
+        out['halfway_to_peak'] = price + 0.5 * (peak - price)
+        out['upside_to_peak_pct'] = (peak / price - 1) * 100
+        out['upside_halfway_pct'] = (out['halfway_to_peak'] / price - 1) * 100
+
+    tm = prof.get('target_mean')
+    if isinstance(tm, (int, float)) and tm and tm > 0:
+        out['analyst_mean'] = float(tm)
+        out['analyst_low'] = prof.get('target_low')
+        out['analyst_high'] = prof.get('target_high')
+        out['analyst_n'] = prof.get('target_n')
+        out['upside_analyst_pct'] = (float(tm) / price - 1) * 100
+
+    own_ps, med_ps = prof.get('ps_ttm'), (ind or {}).get('peer_ps_median', np.nan)
+    if (isinstance(own_ps, (int, float)) and own_ps and own_ps > 0
+            and np.isfinite(med_ps) and med_ps > 0):
+        out['own_ps'] = float(own_ps)
+        out['peer_ps_median'] = float(med_ps)
+        out['peer_implied'] = price * float(med_ps) / float(own_ps)
+        out['upside_peer_pct'] = (float(med_ps) / float(own_ps) - 1) * 100
+    return out
 
 
 def insider_summary(buys, ticker, asof, windows=(90, 180)):
@@ -197,7 +388,7 @@ def pillar_checklist(row, fund, peers, ins):
     return out
 
 
-def build(asof=None, top=12, with_news=True, news_items=8):
+def build(asof=None, top=12, with_news=True, news_items=8, refresh_profiles=False):
     d, f = load_panel()
     close = d['close']
     asof = (pd.Timestamp(asof) if asof else close.index[-1])
@@ -220,11 +411,22 @@ def build(asof=None, top=12, with_news=True, news_items=8):
     funds = fetch_fundamentals.get(tickers, quiet=True)
     buys = load_insiders()
 
+    # Profiles cover the whole index, not just the candidates: naming a company's
+    # three largest competitors means knowing every index member's industry.
+    member_row = d['member'].reindex(columns=close.columns).fillna(False).loc[asof]
+    members = sorted(set(member_row[member_row].index.tolist()) | set(tickers))
+    profiles = fetch_profiles(members, refresh=refresh_profiles)
+    ret12 = f['ret_12m'].loc[asof]
+
     entries = []
     for i, row in scored.iterrows():
         t = row['ticker']
         fund = funds.get(t)
         peers = peer_context(f, d, t, asof)
+        prof = profiles.get(t) or {}
+        ind = industry_context(t, profiles, members, ret12)
+        trend = price_trend(close, t, asof)
+        levels = reference_levels(t, float(row['price']), close, asof, profiles, ind)
         ins = insider_summary(buys, t, asof)
         heads = []
         if with_news:
@@ -232,6 +434,8 @@ def build(asof=None, top=12, with_news=True, news_items=8):
             heads = fetch_headlines(t, max_items=news_items)
         entries.append({
             'ticker': t,
+            'name': prof.get('long_name'),
+            'description': _first_sentence(prof.get('summary')),
             'price': float(row['price']),
             'score': float(row['score']),
             'band': row['band'],
@@ -246,16 +450,19 @@ def build(asof=None, top=12, with_news=True, news_items=8):
             'vol_ann': float(row['vol_ann']),
             'fundamentals': fund,
             'peers': peers,
+            'industry_context': ind,
+            'trend': trend,
+            'levels': levels,
             'insiders': ins,
             'headlines': heads,
             'pillars': pillar_checklist(row, fund, peers, ins),
         })
     if with_news:
         print("\r" + " " * 40 + "\r", end='')
-    return asof, entries
+    return asof, entries, close.index[-1]
 
 
-def render(asof, entries):
+def render(asof, entries, latest=None):
     L = [f'# Research dossiers — {asof.date()}', '',
          f'{len(entries)} candidates, ranked by divergence from their industry '
          f'(most negative `rel_12m` first).', '',
@@ -263,6 +470,14 @@ def render(asof, entries):
          'carries no\n> forward rank information (IC ≈ 0, quintiles sloping the wrong way), '
          'so do not treat\n> STRONG/WATCH as a quality ranking. Pillars 4 and 5 are the '
          'decision; everything else is context.', '']
+
+    if latest is not None and asof < latest:
+        L += [f'> **Backdated to {asof.date()}, but not entirely.** Prices, trends and peer '
+              'comparisons come\n> from the panel and respect the as-of date. Company '
+              'descriptions, market caps, analyst\n> targets and P/S ratios are fetched live '
+              'and describe today, not that date — so the\n> "Reference levels" section leaks '
+              'the future in a historical run and must not be used\n> to evaluate how this '
+              'would have looked at the time.', '']
 
     L += ['| # | Ticker | Price | DD 3y | vs industry | Revenue YoY | Op margin Δ | FCF | Survivability |',
           '|---|---|---|---|---|---|---|---|---|']
@@ -277,8 +492,30 @@ def render(asof, entries):
 
     for i, e in enumerate(entries, 1):
         fu, pe, ins = e['fundamentals'], e['peers'], e['insiders']
-        L += ['---', '', f"## {i}. {e['ticker']} — ${e['price']:.2f}", '',
-              f"**Setup.** {e['dd_3y_pct']:.0f}% off its 3-year peak, "
+        ic, tr, lv = e.get('industry_context') or {}, e.get('trend') or {}, e.get('levels') or {}
+        title = f"## {i}. {e['ticker']}"
+        if e.get('name'):
+            title += f" — {e['name']}"
+        L += ['---', '', f"{title} — ${e['price']:.2f}", '']
+
+        if e.get('description'):
+            L += [f"**What it does.** {e['description']}", '']
+
+        if ic.get('industry'):
+            line = (f"**Industry.** {ic['industry']}"
+                    + (f" ({ic['sector']})" if ic.get('sector') else '')
+                    + f" — {ic['n_in_industry'] + 1} S&P 500 names compete here.")
+            if ic.get('competitors'):
+                parts = []
+                for c in ic['competitors']:
+                    r = c.get('ret_12m', np.nan)
+                    parts.append(f"{c['ticker']} ({_fmt_money(c['market_cap'])}"
+                                 + (f", 12m {_fmt_pct(r, dp=0)}" if np.isfinite(r) else '')
+                                 + ")")
+                line += f" Largest competitors: {', '.join(parts)}."
+            L += [line, '']
+
+        L += [f"**Setup.** {e['dd_3y_pct']:.0f}% off its 3-year peak, "
               f"{e['rel_12m']:.0f}pp behind its industry over 12 months, "
               f"{e['off_52w_low_pct']:.0f}% off the 52-week low. "
               f"{'Above' if e['above_200'] else 'Below'} the 200dma, "
@@ -286,7 +523,8 @@ def render(asof, entries):
               f"Annualized vol {e['vol_ann']:.0f}%. Tag `{e['tag']}`.", '']
 
         if pe.get('n_peers', 0) >= PEER_MIN:
-            L += [f"**Industry.** {pe['industry']} up {e['ind_ret_12m']:.0f}% over 12m. "
+            L += [f"**Divergence.** Return-correlation bucket {pe['industry']} is up "
+                  f"{e['ind_ret_12m']:.0f}% over 12m. "
                   f"Against {pe['n_peers']} index peers, {e['ticker']} returned "
                   f"{pe['ticker_12m']:.0f}% vs a peer median of {pe['peer_median_12m']:.0f}% "
                   f"({pe['vs_peer_median_pp']:+.0f}pp, {pe['percentile_in_peers']:.0f}th percentile). "
@@ -295,8 +533,48 @@ def render(asof, entries):
                      if pe['peers_also_down'] >= max(2, pe['n_peers'] // 3)
                      else "Peers are holding up, so the damage looks company-specific."), '']
         else:
-            L += [f"**Industry.** {pe.get('industry', '?')} up {e['ind_ret_12m']:.0f}% over 12m "
+            L += [f"**Divergence.** Return-correlation bucket {pe.get('industry', '?')} is up "
+                  f"{e['ind_ret_12m']:.0f}% over 12m "
                   f"(too few index peers for a comparison).", '']
+
+        if tr:
+            legs = '  '.join(f"{g['label']} {g['ret_pct']:+.0f}%" for g in tr.get('legs', []))
+            L += ['**12-month price trend.**', '',
+                  f"`{tr['sparkline']}`  (weekly closes, {_fmt_pct(tr['ret_12m_pct'], dp=0)} "
+                  f"over the year)", '',
+                  f"- 52w high ${tr['high']:.2f} on {tr['high_date']} "
+                  f"({_fmt_pct(tr['from_high_pct'], dp=0)} from here)",
+                  f"- 52w low ${tr['low']:.2f} on {tr['low_date']} "
+                  f"({_fmt_pct(tr['from_low_pct'], dp=0)} from here)"
+                  + ('  ← low is within the last 90 days, so the fall may not be over'
+                     if tr.get('bottom_is_recent') else ''),
+                  f"- Quarterly legs: {legs}" if legs else '', '']
+
+        if lv:
+            L += ['**Reference levels.** Not forecasts — three independent anchors, '
+                  'shown together because they disagree.', '']
+            if 'analyst_mean' in lv:
+                rng = ''
+                if lv.get('analyst_low') and lv.get('analyst_high'):
+                    rng = (f", range ${float(lv['analyst_low']):.0f}–"
+                           f"${float(lv['analyst_high']):.0f}")
+                L.append(f"- Analyst consensus ${lv['analyst_mean']:.2f} "
+                         f"({_fmt_pct(lv['upside_analyst_pct'], dp=0)}"
+                         f"{rng}, n={lv.get('analyst_n', '?')}). Sell-side targets "
+                         "chase price and skew high.")
+            if 'peak_3y' in lv:
+                L.append(f"- Prior 3y peak ${lv['peak_3y']:.2f} "
+                         f"({_fmt_pct(lv['upside_to_peak_pct'], dp=0)}); halfway back "
+                         f"${lv['halfway_to_peak']:.2f} "
+                         f"({_fmt_pct(lv['upside_halfway_pct'], dp=0)}). Full recovery "
+                         "assumes the old multiple was deserved.")
+            if 'peer_implied' in lv:
+                L.append(f"- At the peer median P/S of {lv['peer_ps_median']:.1f}× "
+                         f"(this name: {lv['own_ps']:.1f}×) the price would be "
+                         f"${lv['peer_implied']:.2f} "
+                         f"({_fmt_pct(lv['upside_peer_pct'], dp=0)}). Assumes it deserves "
+                         "peer valuation, which is the thing in question.")
+            L.append('')
 
         if fu:
             L += ['**Financials** (SEC XBRL, period end '
@@ -355,10 +633,13 @@ def main():
     ap.add_argument('--top', type=int, default=12, help='How many candidates (default 12)')
     ap.add_argument('--asof', default=None, help='Freeze to a past date (YYYY-MM-DD)')
     ap.add_argument('--no-news', action='store_true', help='Skip yfinance headline calls')
+    ap.add_argument('--refresh-profiles', action='store_true',
+                    help='Refetch company profiles even if cached and recent')
     ap.add_argument('--out', default=None, help='Output markdown path')
     args = ap.parse_args()
 
-    asof, entries = build(asof=args.asof, top=args.top, with_news=not args.no_news)
+    asof, entries, latest = build(asof=args.asof, top=args.top, with_news=not args.no_news,
+                                  refresh_profiles=args.refresh_profiles)
     if not entries:
         print("no candidates")
         return
@@ -366,7 +647,7 @@ def main():
     stamp = asof.strftime('%Y%m%d')
     md_path = Path(args.out) if args.out else DATA / f'dossier_{stamp}.md'
     json_path = DATA / f'dossier_{stamp}.json'
-    md_path.write_text(render(asof, entries))
+    md_path.write_text(render(asof, entries, latest))
     json_path.write_text(json.dumps(
         {'asof': str(asof.date()), 'generated': datetime.now().isoformat(),
          'entries': entries}, indent=2, default=str))

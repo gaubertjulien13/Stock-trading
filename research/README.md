@@ -13,7 +13,7 @@ Most files in this directory are finished investigations. Only these are the loo
 | Script | What it does |
 |---|---|
 | `recommend.py` | Stage-1 filter + Stage-2 score, writes the weekly watchlist |
-| `dossier.py` | Evidence brief per candidate: fundamentals, peers, insiders, news, pillar checklist |
+| `dossier.py` | Evidence brief per candidate: what the company does, industry and competitors, 12-month price trend, fundamentals, reference price levels, insiders, news, pillar checklist |
 | `journal.py` | Records decisions and theses before outcomes are known |
 
 ```
@@ -43,6 +43,7 @@ if there is one — lives in pillars 4 and 5, which are left for you to fill in.
 | `factor_power.py` | `clean.pkl` — the cleaned panel everything else reads |
 | `fetch_fundamentals.py` | Point-in-time SEC XBRL financials (used by `dossier.py`) |
 | `fetch_insiders.py` | SEC Form 4 open-market buys |
+| *(inside `dossier.py`)* | `company_profiles.json` — yfinance descriptions, industries, market caps and analyst targets for the index; built once, entries refreshed monthly |
 | `engine.py` | Shared feature/backtest library, imported by most of the above |
 
 Scripts import each other by bare module name and rely on Python putting this
