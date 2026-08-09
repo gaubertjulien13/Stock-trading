@@ -39,6 +39,9 @@ from recommend import fetch_headlines, stage1_mask, stage2
 PEER_MIN = 4
 PROFILES = DATA / 'company_profiles.json'
 PROFILE_MAX_AGE_DAYS = 30
+# Bump when fields are added, so existing caches backfill instead of silently
+# rendering blanks for everything cached before the change.
+PROFILE_VERSION = 2
 
 
 def _fmt_money(v, unit='B'):
@@ -57,6 +60,13 @@ def _fmt_pct(v, dp=1, sign=True):
 def _fmt_pp(v, dp=1):
     """Percentage-point deltas: '+2.8pp', never '+2.8%pp'."""
     return f"{v:+.{dp}f}pp" if np.isfinite(v) else 'n/a'
+
+
+def _ord(n):
+    """'1st', '33rd' - percentiles read as text, not as '1th'."""
+    n = int(round(n))
+    suffix = 'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+    return f"{n}{suffix}"
 
 
 def load_panel():
@@ -98,7 +108,9 @@ def fetch_profiles(tickers, refresh=False, quiet=False):
     cache = _load_profiles()
     cutoff = (datetime.now() - pd.Timedelta(days=PROFILE_MAX_AGE_DAYS)).isoformat()
     todo = [t for t in tickers
-            if refresh or t not in cache or (cache[t].get('fetched') or '') < cutoff]
+            if refresh or t not in cache
+            or cache[t].get('v') != PROFILE_VERSION
+            or (cache[t].get('fetched') or '') < cutoff]
 
     for i, t in enumerate(todo, 1):
         if not quiet and (i % 25 == 0 or i == len(todo)):
@@ -116,12 +128,17 @@ def fetch_profiles(tickers, refresh=False, quiet=False):
             'ps_ttm': info.get('priceToSalesTrailing12Months'),
             'trailing_pe': info.get('trailingPE'),
             'forward_pe': info.get('forwardPE'),
+            'trailing_eps': info.get('trailingEps'),
+            'forward_eps': info.get('forwardEps'),
+            'earnings_growth': info.get('earningsGrowth'),
+            'earnings_q_growth': info.get('earningsQuarterlyGrowth'),
             'target_mean': info.get('targetMeanPrice'),
             'target_low': info.get('targetLowPrice'),
             'target_high': info.get('targetHighPrice'),
             'target_n': info.get('numberOfAnalystOpinions'),
             'recommendation': info.get('recommendationKey'),
             'fetched': datetime.now().isoformat(),
+            'v': PROFILE_VERSION,
         }
     if todo:
         PROFILES.write_text(json.dumps(cache, indent=1, default=str))
@@ -172,7 +189,64 @@ def industry_context(ticker, profiles, members, ret12):
         'n_in_industry': len(pool),
         'competitors': comps,
         'peer_ps_median': float(np.median(ps)) if len(ps) >= 3 else np.nan,
+        'pool': [t for _, t, _ in pool],
     }
+
+
+def _nums(profiles, tickers, key, lo=-np.inf, hi=np.inf):
+    out = []
+    for t in tickers:
+        v = (profiles.get(t) or {}).get(key)
+        if isinstance(v, (int, float)) and v is not None and np.isfinite(v) and lo < v < hi:
+            out.append(float(v))
+    return out
+
+
+def eps_context(ticker, profiles, pool):
+    """Earnings against the industry the company actually competes in.
+
+    Revenue and margins already appear from SEC filings; this adds the bottom
+    line and what the market pays for it. EPS levels are not comparable across
+    companies with different share counts, so the comparison is on growth and on
+    the multiple - both of which say whether the market is discounting this name
+    specifically or the whole industry.
+
+    yfinance for both sides on purpose: a SEC-derived figure for the candidate
+    against a vendor figure for peers would not be measuring the same thing.
+    """
+    me = profiles.get(ticker) or {}
+    if not pool:
+        return {}
+
+    # P/E outliers are usually near-zero earnings, not information.
+    peer_g = _nums(profiles, pool, 'earnings_growth', -5, 10)
+    peer_pe = _nums(profiles, pool, 'trailing_pe', 0, 200)
+    peer_fpe = _nums(profiles, pool, 'forward_pe', 0, 200)
+
+    g = me.get('earnings_growth')
+    g = float(g) if isinstance(g, (int, float)) and g is not None and np.isfinite(g) else np.nan
+    out = {
+        'trailing_eps': me.get('trailing_eps'),
+        'forward_eps': me.get('forward_eps'),
+        'eps_growth_pct': g * 100 if np.isfinite(g) else np.nan,
+        'trailing_pe': me.get('trailing_pe'),
+        'forward_pe': me.get('forward_pe'),
+        'n_peers': len(peer_g),
+        'peer_eps_growth_pct': float(np.median(peer_g)) * 100 if len(peer_g) >= 3 else np.nan,
+        'peer_trailing_pe': float(np.median(peer_pe)) if len(peer_pe) >= 3 else np.nan,
+        'peer_forward_pe': float(np.median(peer_fpe)) if len(peer_fpe) >= 3 else np.nan,
+    }
+    if np.isfinite(g) and len(peer_g) >= 3:
+        out['eps_growth_vs_peers_pp'] = out['eps_growth_pct'] - out['peer_eps_growth_pct']
+        out['eps_growth_percentile'] = float((np.array(peer_g) < g).mean() * 100)
+
+    te, pe_med = me.get('trailing_pe'), out['peer_trailing_pe']
+    if (isinstance(te, (int, float)) and te and te > 0 and np.isfinite(pe_med) and pe_med > 0):
+        out['pe_discount_pct'] = (float(te) / pe_med - 1) * 100
+    fe, fpe_med = me.get('forward_pe'), out['peer_forward_pe']
+    if (isinstance(fe, (int, float)) and fe and fe > 0 and np.isfinite(fpe_med) and fpe_med > 0):
+        out['fpe_discount_pct'] = (float(fe) / fpe_med - 1) * 100
+    return out
 
 
 def _sparkline(values):
@@ -425,6 +499,7 @@ def build(asof=None, top=12, with_news=True, news_items=8, refresh_profiles=Fals
         peers = peer_context(f, d, t, asof)
         prof = profiles.get(t) or {}
         ind = industry_context(t, profiles, members, ret12)
+        eps = eps_context(t, profiles, ind.get('pool') or [])
         trend = price_trend(close, t, asof)
         levels = reference_levels(t, float(row['price']), close, asof, profiles, ind)
         ins = insider_summary(buys, t, asof)
@@ -451,6 +526,7 @@ def build(asof=None, top=12, with_news=True, news_items=8, refresh_profiles=Fals
             'fundamentals': fund,
             'peers': peers,
             'industry_context': ind,
+            'eps': eps,
             'trend': trend,
             'levels': levels,
             'insiders': ins,
@@ -493,6 +569,7 @@ def render(asof, entries, latest=None):
     for i, e in enumerate(entries, 1):
         fu, pe, ins = e['fundamentals'], e['peers'], e['insiders']
         ic, tr, lv = e.get('industry_context') or {}, e.get('trend') or {}, e.get('levels') or {}
+        ep = e.get('eps') or {}
         title = f"## {i}. {e['ticker']}"
         if e.get('name'):
             title += f" — {e['name']}"
@@ -527,7 +604,7 @@ def render(asof, entries, latest=None):
                   f"{e['ind_ret_12m']:.0f}% over 12m. "
                   f"Against {pe['n_peers']} index peers, {e['ticker']} returned "
                   f"{pe['ticker_12m']:.0f}% vs a peer median of {pe['peer_median_12m']:.0f}% "
-                  f"({pe['vs_peer_median_pp']:+.0f}pp, {pe['percentile_in_peers']:.0f}th percentile). "
+                  f"({pe['vs_peer_median_pp']:+.0f}pp, {_ord(pe['percentile_in_peers'])} percentile). "
                   + (f"{pe['peers_also_down']} of {pe['n_peers']} peers are also down more than 20%, "
                      "so check whether this is really company-specific."
                      if pe['peers_also_down'] >= max(2, pe['n_peers'] // 3)
@@ -591,6 +668,44 @@ def render(asof, entries, latest=None):
                   f"- Flags: {', '.join(fu['flags']) if fu['flags'] else 'none'}", '']
         else:
             L += ['**Financials.** Not available from SEC XBRL for this ticker.', '']
+
+        if ep and ep.get('n_peers', 0) >= 3:
+            def _n(v, dp=2, pre='', suf=''):
+                return (f"{pre}{float(v):.{dp}f}{suf}"
+                        if isinstance(v, (int, float)) and v is not None
+                        and np.isfinite(v) else 'n/a')
+
+            L += [f"**EPS vs industry** ({ep['n_peers']} {ic.get('industry', 'industry')} "
+                  f"peers with data):", '',
+                  '| | This name | Industry median |', '|---|---|---|',
+                  f"| EPS (TTM) | {_n(ep.get('trailing_eps'), 2, '$')} | — |",
+                  f"| EPS (forward) | {_n(ep.get('forward_eps'), 2, '$')} | — |",
+                  f"| EPS growth (YoY) | {_fmt_pct(ep.get('eps_growth_pct', np.nan), dp=0)} | "
+                  f"{_fmt_pct(ep.get('peer_eps_growth_pct', np.nan), dp=0)} |",
+                  f"| Trailing P/E | {_n(ep.get('trailing_pe'), 1, suf='×')} | "
+                  f"{_n(ep.get('peer_trailing_pe'), 1, suf='×')} |",
+                  f"| Forward P/E | {_n(ep.get('forward_pe'), 1, suf='×')} | "
+                  f"{_n(ep.get('peer_forward_pe'), 1, suf='×')} |", '']
+
+            notes = []
+            if 'eps_growth_vs_peers_pp' in ep:
+                notes.append(
+                    f"EPS growth is {_fmt_pp(ep['eps_growth_vs_peers_pp'], dp=0)} vs the peer "
+                    f"median ({_ord(ep['eps_growth_percentile'])} percentile) — "
+                    + ("earnings are holding up better than the price implies, which is the "
+                       "setup this funnel is looking for."
+                       if ep['eps_growth_vs_peers_pp'] > 0 else
+                       "earnings are lagging peers too, so the discount may be deserved."))
+            if 'fpe_discount_pct' in ep:
+                d = ep['fpe_discount_pct']
+                notes.append(
+                    f"Forward P/E is {abs(d):.0f}% {'below' if d < 0 else 'above'} the peer "
+                    f"median. " + ("Cheap on forward earnings — but check whether those "
+                                   "estimates have already been cut."
+                                   if d < 0 else
+                                   "Not cheap on forward earnings despite the drawdown, which "
+                                   "usually means estimates fell faster than the price."))
+            L += [f"- {n}" for n in notes] + ([''] if notes else [])
 
         if ins:
             a, b = ins.get('90d', {}), ins.get('180d', {})

@@ -13,7 +13,7 @@ Most files in this directory are finished investigations. Only these are the loo
 | Script | What it does |
 |---|---|
 | `recommend.py` | Stage-1 filter + Stage-2 score, writes the weekly watchlist |
-| `dossier.py` | Evidence brief per candidate: what the company does, industry and competitors, 12-month price trend, fundamentals, reference price levels, insiders, news, pillar checklist |
+| `dossier.py` | Evidence brief per candidate: what the company does, industry and competitors, 12-month price trend, fundamentals, EPS vs industry, reference price levels, insiders, news, pillar checklist |
 | `journal.py` | Records decisions and theses before outcomes are known |
 
 ```
