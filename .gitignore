@@ -27,3 +27,5 @@ research/data/company_profiles.json
 # Personal files that happen to live in this directory.
 *.numbers
 send_worldcup_invites.py
+
+.DS_Store
