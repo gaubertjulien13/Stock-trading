@@ -181,9 +181,43 @@ tell whether your judgment is separating names, rather than whether the screen i
 ./venv/bin/python research/journal.py review
 ```
 
+When you sell, close the position rather than leaving it open. Otherwise `review`
+keeps scoring the stock over the full horizon and never sees the trade you
+actually made:
+
+```bash
+./venv/bin/python research/journal.py close --ticker BSX --price 61.40 \
+    --reason "Thesis played out; margin recovery is now consensus"
+```
+
+`review` then measures the realised fill over the window your money was at risk,
+against SPY over that same window.
+
 `review` scores every decision against SPY over its intended horizon, compares
 buys against passes, and once you have five or more buys checks whether your
 conviction rating correlates with outcomes.
+
+### Never hand-edit the file
+
+Judgments are appended, facts are corrected. Changing your mind means logging a
+second entry — a watch that becomes a buy, a buy you decide against — never
+overwriting the first. Each row is worth something only because it was written
+before the outcome was known, so editing a past `decision` or `thesis` turns the
+review into a measure of hindsight rather than judgment.
+
+Facts that were already true at entry can be fixed, and `edit` exists for that:
+
+```bash
+./venv/bin/python research/journal.py edit --ticker BSX --field price --value 49.55
+```
+
+Editable fields are `price`, `size_pct`, `horizon_days`, `notes` and the three
+exit fields. The command refuses `decision`, `date`, `thesis`, `mechanism`,
+`conviction` and `pillars_met` on purpose. Use `--date-of` or `--decision` to
+disambiguate when a ticker has several entries.
+
+Editing the CSV in a spreadsheet also reformats the date and price columns,
+which is its own source of corruption.
 
 **Nothing in that output means anything until roughly 20–30 resolved decisions.**
 With a payoff this skewed, small samples are noise. Treat it as a habit for the
