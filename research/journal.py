@@ -13,9 +13,18 @@ Two benchmarks are used, because beating neither means the work is not paying:
 Recording the thesis matters as much as the decision. Without it, hindsight will
 rewrite what you believed, and the review becomes theatre.
 
+The file is append-only for anything that is a judgment. Change your mind by
+logging a second entry, never by editing the first: the value of a row is that
+it was written before the outcome was known. `edit` therefore refuses to touch
+the decision, date, thesis, mechanism, conviction or pillars, and exists only to
+correct facts that were already true - a fill price, a position size, a typo.
+
     venv/bin/python3 research/journal.py add --ticker BSX --decision buy \\
         --thesis "Restructuring plus Q2 beat; recall is contained and one-off" \\
-        --mechanism "New management cost program" --conviction 4
+        --mechanism "New management cost program" --conviction 4 --size 3
+    venv/bin/python3 research/journal.py close --ticker BSX --price 61.40 \\
+        --reason "Thesis played out; margin recovery is now consensus"
+    venv/bin/python3 research/journal.py edit --ticker BSX --field price --value 49.55
     venv/bin/python3 research/journal.py list
     venv/bin/python3 research/journal.py review
 """
@@ -32,8 +41,23 @@ from engine import DATA
 
 JOURNAL = DATA / 'decision_journal.csv'
 COLUMNS = ['date', 'ticker', 'decision', 'price', 'conviction', 'mechanism',
-           'thesis', 'pillars_met', 'size_pct', 'horizon_days', 'notes']
+           'thesis', 'pillars_met', 'size_pct', 'horizon_days', 'notes',
+           'exit_date', 'exit_price', 'exit_reason']
 DECISIONS = ('buy', 'watch', 'pass')
+
+# What `edit` may touch. Facts can be wrong at entry - a fill price that differed
+# from the close, a size not yet computed - and correcting them rewrites nothing.
+FACT_FIELDS = ('price', 'size_pct', 'horizon_days', 'notes',
+               'exit_date', 'exit_price', 'exit_reason')
+# What it may not. Changing these after the fact turns the record into hindsight
+# and makes `review` measure editing rather than judgment.
+JUDGMENT_FIELDS = ('date', 'decision', 'thesis', 'mechanism', 'conviction', 'pillars_met')
+
+
+def _dates_out(s):
+    """Format a date column date-only, leaving blanks for missing values."""
+    d = pd.to_datetime(s, format='mixed', errors='coerce')
+    return d.dt.strftime('%Y-%m-%d').where(d.notna(), '')
 
 
 def load():
@@ -42,7 +66,14 @@ def load():
     df = pd.read_csv(JOURNAL)
     # 'mixed' tolerates files written before dates were normalised on save.
     df['date'] = pd.to_datetime(df['date'], format='mixed')
-    return df
+    for c in COLUMNS:  # journals written before exit tracking existed
+        if c not in df.columns:
+            df[c] = ''
+    # An all-empty column reads back as float64, and writing a date or reason into
+    # it then warns about an incompatible dtype.
+    for c in ('exit_date', 'exit_reason', 'notes', 'mechanism'):
+        df[c] = df[c].astype(object)
+    return df[COLUMNS]
 
 
 def save(df):
@@ -54,8 +85,18 @@ def save(df):
     """
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     out = df.copy()
-    out['date'] = pd.to_datetime(out['date'], format='mixed').dt.strftime('%Y-%m-%d')
+    out['date'] = _dates_out(out['date'])
+    out['exit_date'] = _dates_out(out['exit_date'])
     out.to_csv(JOURNAL, index=False)
+
+
+def _is_open(row):
+    """A buy that has not been closed out."""
+    return row['decision'] == 'buy' and not _has(row['exit_date'])
+
+
+def _has(v):
+    return v is not None and not (isinstance(v, float) and np.isnan(v)) and str(v).strip() not in ('', 'nan', 'NaT')
 
 
 def _price_now(ticker):
@@ -82,6 +123,9 @@ def cmd_add(args):
         'size_pct': args.size if args.size is not None else '',
         'horizon_days': args.horizon,
         'notes': args.notes or '',
+        'exit_date': '',
+        'exit_price': '',
+        'exit_reason': '',
     }
     if args.decision == 'buy' and not args.mechanism:
         print("  warning: a buy without a named recovery mechanism is the pattern "
@@ -105,29 +149,135 @@ def cmd_list(args):
         df = df[df['decision'] == args.decision]
     for _, r in df.sort_values('date').iterrows():
         px = f"${r['price']:.2f}" if pd.notna(r['price']) else 'n/a'
+        if _has(r['exit_date']):
+            ret = (float(r['exit_price']) / float(r['price']) - 1.0) * 100
+            state = f"-> ${float(r['exit_price']):.2f} {str(r['exit_date'])[:10]} {ret:+.1f}%"
+        else:
+            state = ''
         print(f"  {r['date'].date()}  {r['decision']:5s}  {r['ticker']:6s} {px:>9s}  "
-              f"conv {r['conviction']}  {str(r['thesis'])[:70]}")
-    print(f"\n  {len(df)} decisions")
+              f"conv {r['conviction']}  {str(r['thesis'])[:52]}")
+        if state:
+            print(f"  {'':43s}closed {state}")
+    n_open = int(df.apply(_is_open, axis=1).sum())
+    print(f"\n  {len(df)} decisions, {n_open} open position(s)")
 
 
-def _forward(ticker, start, horizon_days):
-    """Return (stock_pct, spy_pct) from `start` over the horizon, or to today."""
+def _forward(ticker, start, horizon_days, end=None):
+    """Return (stock_pct, spy_pct) from `start` to `end`, else over the horizon.
+
+    `end` is passed for closed positions so SPY is measured over the window the
+    money was actually at risk, not a horizon that never ran its course.
+    """
     try:
         import yfinance as yf
-        end = min(pd.Timestamp.now(), pd.Timestamp(start) + pd.Timedelta(days=horizon_days + 5))
-        data = yf.download([ticker, 'SPY'], start=pd.Timestamp(start) - pd.Timedelta(days=5),
-                           end=end + pd.Timedelta(days=1), progress=False, auto_adjust=True)
+        start = pd.Timestamp(start)
+        stop = (pd.Timestamp(end) if _has(end)
+                else min(pd.Timestamp.now(), start + pd.Timedelta(days=horizon_days + 5)))
+        data = yf.download([ticker, 'SPY'], start=start - pd.Timedelta(days=5),
+                           end=stop + pd.Timedelta(days=1), progress=False, auto_adjust=True)
         px = data['Close'] if isinstance(data.columns, pd.MultiIndex) else data
         px = px.dropna()
         if len(px) < 2:
             return np.nan, np.nan
-        s = px[px.index >= pd.Timestamp(start)]
+        s = px[(px.index >= start) & (px.index <= stop)]
         if s.empty or len(s) < 2:
             return np.nan, np.nan
         r = (s.iloc[-1] / s.iloc[0] - 1.0) * 100
         return float(r.get(ticker, np.nan)), float(r.get('SPY', np.nan))
     except Exception:
         return np.nan, np.nan
+
+
+def _select(df, ticker, date=None, decision=None, open_only=False):
+    """Find the one row a command should act on, or explain the ambiguity."""
+    t = ticker.upper()
+    rows = df[df['ticker'] == t]
+    if rows.empty:
+        return None, f"no entries for {t}"
+    if date:
+        rows = rows[rows['date'] == pd.Timestamp(date)]
+    if decision:
+        rows = rows[rows['decision'] == decision]
+    if open_only:
+        rows = rows[rows.apply(_is_open, axis=1)]
+    if rows.empty:
+        return None, f"no matching entry for {t} (try journal.py list)"
+    if len(rows) > 1:
+        # Most recent is nearly always what was meant, but say so rather than guess silently.
+        print(f"  {len(rows)} matching entries for {t}; using the most recent "
+              f"({str(rows.iloc[-1]['date'])[:10]} {rows.iloc[-1]['decision']}). "
+              f"Narrow with --date if that is wrong.")
+    return rows.index[-1], None
+
+
+def cmd_close(args):
+    df = load()
+    idx, err = _select(df, args.ticker, args.date_of, 'buy', open_only=True)
+    if idx is None:
+        print(f"  {err}. Only an open buy can be closed.")
+        return
+    row = df.loc[idx]
+    exit_price = args.price if args.price else _price_now(row['ticker'])
+    if not np.isfinite(exit_price):
+        print("  could not determine an exit price; pass --price")
+        return
+    exit_date = args.date or datetime.now().strftime('%Y-%m-%d')
+    df.at[idx, 'exit_date'] = exit_date
+    df.at[idx, 'exit_price'] = exit_price
+    df.at[idx, 'exit_reason'] = args.reason or ''
+    save(df)
+
+    entry = float(row['price'])
+    ret = (exit_price / entry - 1.0) * 100
+    _, spy = _forward(row['ticker'], row['date'], int(row['horizon_days'] or 180), end=exit_date)
+    held = (pd.Timestamp(exit_date) - pd.Timestamp(row['date'])).days
+    print(f"  closed {row['ticker']} @ ${exit_price:.2f} on {exit_date} "
+          f"(entry ${entry:.2f}, held {held}d)")
+    print(f"  realised {ret:+.1f}%", end='')
+    if np.isfinite(spy):
+        print(f"   SPY over the same window {spy:+.1f}%   excess {ret - spy:+.1f}pp")
+    else:
+        print()
+    if args.reason:
+        print(f"  reason: {args.reason}")
+
+
+def cmd_edit(args):
+    df = load()
+    if args.field in JUDGMENT_FIELDS:
+        print(f"  refusing to edit '{args.field}'.\n"
+              f"  That is a judgment, and changing it after the fact is what makes a\n"
+              f"  journal worthless - review would then be scoring hindsight. Log a new\n"
+              f"  entry instead:  journal.py add --ticker {args.ticker.upper()} "
+              f"--decision ... --thesis ...")
+        return
+    if args.field not in FACT_FIELDS:
+        print(f"  unknown field '{args.field}'. Editable: {', '.join(FACT_FIELDS)}")
+        return
+    idx, err = _select(df, args.ticker, args.date_of, args.decision)
+    if idx is None:
+        print(f"  {err}")
+        return
+    value = args.value
+    if args.field in ('price', 'size_pct', 'exit_price'):
+        try:
+            value = float(value)
+        except ValueError:
+            print(f"  '{value}' is not a number")
+            return
+    elif args.field == 'horizon_days':
+        try:
+            value = int(value)
+        except ValueError:
+            print(f"  '{value}' is not a whole number of days")
+            return
+    old = df.at[idx, args.field]
+    df.at[idx, args.field] = value
+    save(df)
+    r = df.loc[idx]
+    shown = '(empty)' if not _has(old) else old
+    print(f"  {r['ticker']} {str(r['date'])[:10]} {r['decision']}: "
+          f"{args.field} {shown} -> {value}")
 
 
 def cmd_review(args):
@@ -138,19 +288,26 @@ def cmd_review(args):
     print(f"  scoring {len(df)} decisions against SPY over the same windows...\n")
     rows = []
     for _, r in df.iterrows():
-        stock, spy = _forward(r['ticker'], r['date'], int(r['horizon_days'] or 180))
+        closed = _has(r['exit_date']) and _has(r['exit_price'])
+        end = r['exit_date'] if closed else None
+        stock, spy = _forward(r['ticker'], r['date'], int(r['horizon_days'] or 180), end=end)
+        if closed:
+            # The realised fill is the truth; the price series only supplies SPY.
+            stock = (float(r['exit_price']) / float(r['price']) - 1.0) * 100
         rows.append({**r.to_dict(), 'ret_pct': stock, 'spy_pct': spy,
+                     'status': 'closed' if closed else 'open',
                      'excess_pp': stock - spy if np.isfinite(stock) and np.isfinite(spy) else np.nan})
     res = pd.DataFrame(rows).dropna(subset=['ret_pct'])
     if res.empty:
         print("  no resolvable outcomes yet")
         return
 
-    print(f"  {'date':11s} {'dec':6s} {'ticker':7s} {'return':>8s} {'SPY':>8s} {'excess':>9s}  thesis")
+    print(f"  {'date':11s} {'dec':6s} {'ticker':7s} {'return':>8s} {'SPY':>8s} "
+          f"{'excess':>9s} {'state':7s} thesis")
     for _, r in res.sort_values('date').iterrows():
         print(f"  {str(r['date'])[:10]:11s} {r['decision']:6s} {r['ticker']:7s} "
-              f"{r['ret_pct']:+7.1f}% {r['spy_pct']:+7.1f}% {r['excess_pp']:+8.1f}pp  "
-              f"{str(r['thesis'])[:44]}")
+              f"{r['ret_pct']:+7.1f}% {r['spy_pct']:+7.1f}% {r['excess_pp']:+8.1f}pp "
+              f"{r['status']:7s} {str(r['thesis'])[:38]}")
 
     print()
     for dec in DECISIONS:
@@ -197,6 +354,22 @@ def main():
     a.add_argument('--date', help='Override date (YYYY-MM-DD)')
     a.add_argument('--notes')
 
+    c = sub.add_parser('close', help='Record a sale against an open buy')
+    c.add_argument('--ticker', required=True)
+    c.add_argument('--price', type=float, help='Fill price (defaults to last close)')
+    c.add_argument('--date', help='Sale date (YYYY-MM-DD, defaults to today)')
+    c.add_argument('--date-of', dest='date_of',
+                   help='Entry date, if several buys of this ticker are open')
+    c.add_argument('--reason', help='Why you sold - thesis played out, broke, better use of cash')
+
+    e = sub.add_parser('edit', help='Correct a factual field on an existing entry')
+    e.add_argument('--ticker', required=True)
+    e.add_argument('--field', required=True,
+                   help=f"One of: {', '.join(FACT_FIELDS)}")
+    e.add_argument('--value', required=True)
+    e.add_argument('--date-of', dest='date_of', help='Entry date, to disambiguate')
+    e.add_argument('--decision', choices=DECISIONS, help='Decision type, to disambiguate')
+
     l = sub.add_parser('list', help='Show logged decisions')
     l.add_argument('--decision', choices=DECISIONS)
 
@@ -205,6 +378,10 @@ def main():
     args = ap.parse_args()
     if args.cmd == 'add':
         cmd_add(args)
+    elif args.cmd == 'close':
+        cmd_close(args)
+    elif args.cmd == 'edit':
+        cmd_edit(args)
     elif args.cmd == 'list':
         cmd_list(args)
     elif args.cmd == 'review':
